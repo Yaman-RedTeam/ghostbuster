@@ -109,11 +109,40 @@ Built for red teamers, bug bounty hunters, threat intel analysts, and DFIR pract
 
 ### Installation
 
+**Recommended — one-shot installer (handles Kali PEP 668, Termux, Linux/macOS):**
+
 ```bash
 git clone https://github.com/Yaman-RedTeam/ghostbuster
 cd ghostbuster
+chmod +x install.sh
+./install.sh
+```
+
+<details>
+<summary><b>Manual install (per-platform)</b></summary>
+
+**Kali / Debian / Ubuntu (system-wide, works with other pentest tools):**
+```bash
+sudo apt install -y python3-aiohttp python3-phonenumbers python3-exifread \
+                    python3-networkx python3-matplotlib python3-yaml
+pip install -r requirements.txt --break-system-packages
+```
+
+**Termux:**
+```bash
+pkg install python rust
 pip install -r requirements.txt
 ```
+
+**macOS / plain Linux (isolated venv):**
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+</details>
+
+> ⚠️ **Kali users:** don't use `venv` unless you know why — GhostBuster is designed to sit alongside your other CLI tools (nmap, sqlmap, etc.). System-wide install keeps everything on the same PATH.
 
 ### Optional API keys (enhanced results)
 
