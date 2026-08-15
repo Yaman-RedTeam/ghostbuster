@@ -210,6 +210,25 @@ class IPIntel:
         cache.set(f"shodan:{ip}", result)
         return result
 
+# ISO2 → English country name (small helper, no external dep)
+_ISO2_TO_NAME = {
+    "US":"United States","IN":"India","GB":"United Kingdom","CA":"Canada",
+    "AU":"Australia","DE":"Germany","FR":"France","IT":"Italy","ES":"Spain",
+    "JP":"Japan","CN":"China","KR":"South Korea","BR":"Brazil","MX":"Mexico",
+    "RU":"Russia","ZA":"South Africa","NG":"Nigeria","AE":"UAE","SA":"Saudi Arabia",
+    "PK":"Pakistan","BD":"Bangladesh","LK":"Sri Lanka","NP":"Nepal","MM":"Myanmar",
+    "TH":"Thailand","VN":"Vietnam","ID":"Indonesia","PH":"Philippines","MY":"Malaysia",
+    "SG":"Singapore","HK":"Hong Kong","TW":"Taiwan","NZ":"New Zealand","NL":"Netherlands",
+    "BE":"Belgium","CH":"Switzerland","SE":"Sweden","NO":"Norway","DK":"Denmark",
+    "FI":"Finland","IE":"Ireland","PT":"Portugal","GR":"Greece","PL":"Poland",
+    "CZ":"Czechia","AT":"Austria","HU":"Hungary","RO":"Romania","UA":"Ukraine",
+    "TR":"Turkey","IL":"Israel","EG":"Egypt","MA":"Morocco","DZ":"Algeria",
+    "TN":"Tunisia","KE":"Kenya","ET":"Ethiopia","GH":"Ghana","AR":"Argentina",
+    "CL":"Chile","CO":"Colombia","PE":"Peru","VE":"Venezuela","IR":"Iran","AF":"Afghanistan",
+}
+def _country_english_name(iso2: str) -> str:
+    return _ISO2_TO_NAME.get((iso2 or "").upper(), iso2 or "Unknown")
+
 # ─── Module 2: Phone Number Intelligence (Numint-style deep OSINT) ───────────
 
 class PhoneIntel:
@@ -231,6 +250,29 @@ class PhoneIntel:
         370: "🇱🇹", 371: "🇱🇻", 380: "🇺🇦", 420: "🇨🇿", 421: "🇸🇰",
         852: "🇭🇰", 880: "🇧🇩", 886: "🇹🇼", 966: "🇸🇦", 971: "🇦🇪",
         972: "🇮🇱", 974: "🇶🇦", 977: "🇳🇵", 992: "🇹🇯", 994: "🇦🇿",
+    }
+
+    # Approx country centroids (lat, lon) — for map pivots when only country is known
+    COUNTRY_COORDS = {
+        1:  (37.0902, -95.7129),   7:  (61.5240, 105.3188),  20: (26.8206, 30.8025),
+        27: (-30.5595, 22.9375),   30: (39.0742, 21.8243),   31: (52.1326, 5.2913),
+        32: (50.5039, 4.4699),     33: (46.2276, 2.2137),    34: (40.4637, -3.7492),
+        36: (47.1625, 19.5033),    39: (41.8719, 12.5674),   40: (45.9432, 24.9668),
+        41: (46.8182, 8.2275),     43: (47.5162, 14.5501),   44: (55.3781, -3.4360),
+        45: (56.2639, 9.5018),     46: (60.1282, 18.6435),   47: (60.4720, 8.4689),
+        48: (51.9194, 19.1451),    49: (51.1657, 10.4515),   52: (23.6345, -102.5528),
+        55: (-14.2350, -51.9253),  60: (4.2105, 101.9758),   61: (-25.2744, 133.7751),
+        62: (-0.7893, 113.9213),   63: (12.8797, 121.7740),  65: (1.3521, 103.8198),
+        66: (15.8700, 100.9925),   81: (36.2048, 138.2529),  82: (35.9078, 127.7669),
+        84: (14.0583, 108.2772),   86: (35.8617, 104.1954),  90: (38.9637, 35.2433),
+        91: (20.5937, 78.9629),    92: (30.3753, 69.3451),   94: (7.8731, 80.7718),
+        95: (21.9162, 95.9560),    98: (32.4279, 53.6880),  212: (31.7917, -7.0926),
+        234: (9.0820, 8.6753),    254: (-0.0236, 37.9062),  351: (39.3999, -8.2245),
+        352: (49.8153, 6.1296),   353: (53.4129, -8.2439),  358: (61.9241, 25.7482),
+        380: (48.3794, 31.1656),  420: (49.8175, 15.4730),  421: (48.6690, 19.6990),
+        852: (22.3193, 114.1694), 880: (23.6850, 90.3563),  886: (23.6978, 120.9605),
+        966: (23.8859, 45.0792),  971: (23.4241, 53.8478),  972: (31.0461, 34.8516),
+        974: (25.3548, 51.1839),  977: (28.3949, 84.1240),
     }
 
     OSINT_ENGINES = [
@@ -358,6 +400,26 @@ class PhoneIntel:
         fmts = PhoneIntel._format_variants(parsed)
         national_str = str(parsed.national_number)
 
+        # ── Location intelligence ──
+        coords = PhoneIntel.COUNTRY_COORDS.get(parsed.country_code)
+        # Prefer geocoder's specific region (e.g. "Baghpat, UP") if it isn't
+        # just the country name; else fall back to country name.
+        specific = region_name if region_name and region_name.lower() != \
+            _country_english_name(region_iso).lower() else None
+        map_query = specific or region_name or region_iso
+        location = {
+            "specific_region": specific,
+            "country_name":    region_name if not specific else _country_english_name(region_iso),
+            "region_iso":      region_iso,
+            "coords":          {"lat": coords[0], "lon": coords[1]} if coords else None,
+            "google_maps":     f"https://www.google.com/maps/search/{map_query.replace(' ', '+')}"
+                                if map_query else None,
+            "osm":             f"https://www.openstreetmap.org/search?query={map_query.replace(' ', '+')}"
+                                if map_query else None,
+        }
+        if coords:
+            location["maps_pin"] = f"https://www.google.com/maps/@{coords[0]},{coords[1]},6z"
+
         result = {
             "valid": valid,
             "possible": possible,
@@ -370,6 +432,7 @@ class PhoneIntel:
             "carrier": car,
             "line_type": line_type,
             "timezones": timezones,
+            "location": location,
             "messengers": PhoneIntel._messenger_links(fmts["e164"]),
             "reputation_hints": PhoneIntel._reputation_hints(line_type, car),
             "osint_dorks": PhoneIntel._osint_links(
@@ -1045,7 +1108,29 @@ def _render_phone_panels(target: str, data: dict):
     print(_panel("Validity & Format", rows2, width=72,
                  border_color=O, title_color=O))
 
-    # ── Panel 3: Messenger Presence ──
+    # ── Panel 3: Location Intelligence ──
+    loc = data.get("location", {})
+    if loc:
+        rows_loc = []
+        if loc.get("specific_region"):
+            rows_loc.append(("Region",  f"{Y}📍 {loc['specific_region']}{R}"))
+        rows_loc.append(("Country",     f"{W}{loc.get('country_name','?')} "
+                                        f"{D}({loc.get('region_iso','??')}){R}"))
+        c = loc.get("coords")
+        if c:
+            rows_loc.append(("Coords",  f"{C}{c['lat']:.4f}, {c['lon']:.4f}{R}  "
+                                        f"{D}(country centroid){R}"))
+        if loc.get("google_maps"):
+            rows_loc.append(("Google Maps", f"{D}{loc['google_maps']}{R}"))
+        if loc.get("maps_pin"):
+            rows_loc.append(("Map Pin",     f"{D}{loc['maps_pin']}{R}"))
+        if loc.get("osm"):
+            rows_loc.append(("OpenStreetMap", f"{D}{loc['osm']}{R}"))
+        print(_panel("Location Intelligence", rows_loc, width=90,
+                     border_color="\033[38;5;213m",  # pink
+                     title_color="\033[38;5;213m"))
+
+    # ── Panel 4: Messenger Presence ──
     mp = data.get("messenger_presence", {})
     msg = data.get("messengers", {})
     if mp or msg:
