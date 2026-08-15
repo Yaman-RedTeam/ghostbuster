@@ -6,7 +6,7 @@
 
 **_Hunt every ghost in the machine._**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen?style=for-the-badge&logo=semver)]()
+[![Version](https://img.shields.io/badge/version-1.1.0-brightgreen?style=for-the-badge&logo=semver)]()
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?style=for-the-badge&logo=python&logoColor=white)]()
 [![License](https://img.shields.io/badge/license-MIT-orange?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Termux-black?style=for-the-badge&logo=linux&logoColor=white)]()
@@ -275,7 +275,7 @@ Aircel shut down in 2018, so the number provably **cannot** be on Aircel now —
   "meta": {
     "generated": "2026-08-15T09:00:00Z",
     "tool": "GhostBuster OSINT Framework",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "results": [
     {
