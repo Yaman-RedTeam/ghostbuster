@@ -1014,15 +1014,31 @@ class PhoneIntel:
         # just the country name; else fall back to country name.
         specific = region_name if region_name and region_name.lower() != \
             _country_english_name(region_iso).lower() else None
-        # Prefer India circle over phonenumbers geocoder when available
-        if india_circle and not specific:
+
+        # ⚠️ For Indian MOBILE numbers the phonenumbers geocoder region is
+        # unreliable — Jio allocates numbers pan-India (geography-independent)
+        # and MNP scrambles the rest. Trust ONLY our circle table for India;
+        # if there's no circle match, DON'T show the geocoder's guess as fact.
+        geocoder_unreliable = False
+        if parsed.country_code == 91 and line_type in ("mobile", "fixed_or_mobile"):
+            if india_circle:
+                specific = f"{india_circle} circle"
+            else:
+                # Suppress the misleading geocoder region for Indian mobiles
+                geocoder_unreliable = specific is not None
+                specific = None
+        elif india_circle and not specific:
             specific = f"{india_circle} circle"
-        map_query = (india_circle or specific or region_name or region_iso)
+
+        map_query = (india_circle or specific or region_iso)
         location = {
             "specific_region": specific,
+            "geocoder_region": region_name if geocoder_unreliable else None,
+            "geocoder_unreliable": geocoder_unreliable,
             "india_circle":    india_circle,
             "india_original_operator": india_operator,
-            "country_name":    region_name if not specific else _country_english_name(region_iso),
+            "country_name":    _country_english_name(region_iso) if region_iso != "??"
+                               else region_name,
             "region_iso":      region_iso,
             "coords":          {"lat": coords[0], "lon": coords[1]} if coords else None,
             "google_maps":     f"https://www.google.com/maps/search/{map_query.replace(' ', '+')}"
@@ -1844,6 +1860,11 @@ def _render_phone_panels(target: str, data: dict):
                                  f"NOT the current carrier; likely ported (MNP){R}"))
         elif loc.get("specific_region"):
             rows_loc.append(("Region",  f"{Y}📍 {loc['specific_region']}{R}"))
+        elif loc.get("geocoder_unreliable"):
+            rows_loc.append(("Region",
+                f"{RED}unknown{R} {D}(Jio/MNP number — not geo-bound){R}"))
+            rows_loc.append(("  ↳ note",
+                f"{D}geocoder guessed '{loc.get('geocoder_region')}' — unreliable, ignore{R}"))
         rows_loc.append(("Country",     f"{W}{loc.get('country_name','?')} "
                                         f"{D}({loc.get('region_iso','??')}){R}"))
         c = loc.get("coords")
