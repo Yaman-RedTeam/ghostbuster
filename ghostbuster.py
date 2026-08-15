@@ -745,29 +745,36 @@ class PhoneIntel:
         974: (25.3548, 51.1839),  977: (28.3949, 84.1240),
     }
 
+    # Format: (label, url_template, tier)
+    #   tier = "free"    → no signup/payment
+    #   tier = "signup"  → free but needs login
+    #   tier = "paid"    → paywall for details
     OSINT_ENGINES = [
-        # Search engines
-        ("Google",     "https://www.google.com/search?q=%22{q}%22"),
-        ("DuckDuckGo", "https://duckduckgo.com/?q=%22{q}%22"),
-        ("Bing",       "https://www.bing.com/search?q=%22{q}%22"),
-        ("Yandex",     "https://yandex.com/search/?text=%22{q}%22"),
-        ("Brave",      "https://search.brave.com/search?q=%22%2B{q}%22"),
-        ("Startpage",  "https://www.startpage.com/sp/search?query=%22%2B{q}%22"),
-        # Social
-        ("Facebook",   "https://www.facebook.com/search/top/?q={q}"),
-        ("LinkedIn",   "https://www.linkedin.com/search/results/all/?keywords={q}"),
-        ("Twitter/X",  "https://twitter.com/search?q=%22{q}%22"),
-        # Reverse-lookup services (many render their own maps in-page)
-        ("Truecaller",  "https://www.truecaller.com/search/{cc}/{nat}"),
-        ("Sync.me",     "https://sync.me/search/?number=%2B{q}"),
-        ("Whitepages",  "https://www.whitepages.com/phone/{whitepages}"),
-        ("Spydialer",   "https://www.spydialer.com/default.aspx?rp={nat}"),
-        ("Spokeo",      "https://www.spokeo.com/{q}"),
-        ("BeenVerified","https://www.beenverified.com/rf/search/phone?phone={q}"),
-        ("NumLookup",   "https://www.numlookup.com/{q}"),
-        # Leak / code hunts
-        ("Pastebin",    "https://www.google.com/search?q=site%3Apastebin.com+%22{q}%22"),
-        ("GitHub",      "https://github.com/search?q=%22{q}%22&type=code"),
+        # ── Search engines (all free) ──
+        ("Google",       "https://www.google.com/search?q=%22{q}%22", "free"),
+        ("DuckDuckGo",   "https://duckduckgo.com/?q=%22{q}%22", "free"),
+        ("Bing",         "https://www.bing.com/search?q=%22{q}%22", "free"),
+        ("Yandex",       "https://yandex.com/search/?text=%22{q}%22", "free"),
+        ("Brave",        "https://search.brave.com/search?q=%22%2B{q}%22", "free"),
+        ("Startpage",    "https://www.startpage.com/sp/search?query=%22%2B{q}%22", "free"),
+        # ── Social (free browse) ──
+        ("Facebook",     "https://www.facebook.com/search/top/?q={q}", "signup"),
+        ("LinkedIn",     "https://www.linkedin.com/search/results/all/?keywords={q}", "signup"),
+        ("Twitter/X",    "https://twitter.com/search?q=%22{q}%22", "free"),
+        # ── Reverse-lookup — TRULY free (no signup/paywall for basic data) ──
+        ("Truecaller",   "https://www.truecaller.com/search/{cc}/{nat}", "signup"),
+        ("NumLookup",    "https://www.numlookup.com/{q}", "free"),
+        ("ThatsThem",    "https://thatsthem.com/phone/{whitepages}", "free"),
+        ("Free-Lookup",  "https://www.free-lookup.net/{nat}", "free"),
+        ("CallerCentre", "https://callercentre.com/{q}", "free"),
+        ("PhoneValidator","https://www.phonevalidator.com/results.aspx?p={nat}", "free"),
+        # ── Reverse-lookup — paid / gated (marked so you know before clicking) ──
+        ("Whitepages",   "https://www.whitepages.com/phone/{whitepages}", "paid"),
+        ("Spokeo",       "https://www.spokeo.com/{q}", "paid"),
+        ("BeenVerified", "https://www.beenverified.com/rf/search/phone?phone={q}", "paid"),
+        # ── Leak / code hunts (free) ──
+        ("Pastebin",     "https://www.google.com/search?q=site%3Apastebin.com+%22{q}%22", "free"),
+        ("GitHub",       "https://github.com/search?q=%22{q}%22&type=code", "free"),
     ]
 
     @staticmethod
@@ -783,9 +790,9 @@ class PhoneIntel:
         else:
             whitepages = f"{country_code}-{national}"
         out = []
-        for name, url in PhoneIntel.OSINT_ENGINES:
+        for name, url, tier in PhoneIntel.OSINT_ENGINES:
             try:
-                out.append({"engine": name,
+                out.append({"engine": name, "tier": tier,
                             "url": url.format(q=q, cc=country_code, nat=national,
                                               whitepages=whitepages)})
             except KeyError:
@@ -1780,8 +1787,15 @@ def _render_phone_panels(target: str, data: dict):
     # ── Panel 4: OSINT Search Links ──
     dorks = data.get("osint_dorks", [])
     if dorks:
-        rows4 = [(d["engine"], f"{D}{d['url']}{R}") for d in dorks]
-        print(_panel(f"OSINT Search Dorks ({len(dorks)})", rows4, width=90,
+        tier_badge = {"free":   f"{G}[FREE]  {R}",
+                      "signup": f"{Y}[SIGNUP]{R}",
+                      "paid":   f"{RED}[PAID]  {R}"}
+        rows4 = [(d["engine"],
+                  f"{tier_badge.get(d.get('tier','free'), '')} {D}{d['url']}{R}")
+                 for d in dorks]
+        n_free = sum(1 for d in dorks if d.get("tier") == "free")
+        print(_panel(f"OSINT Search Dorks ({len(dorks)} — {n_free} free)",
+                     rows4, width=100,
                      border_color=Y, title_color=Y))
     print()
 
