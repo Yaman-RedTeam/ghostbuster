@@ -1256,11 +1256,18 @@ class DomainIntel:
     async def dns_lookup(domain: str) -> dict:
         result = {}
         try:
-            result["A"] = [str(r) for r in socket.getaddrinfo(domain, None, socket.AF_INET)]
+            # Extract just the IP from each getaddrinfo tuple
+            ips = {ai[4][0] for ai in socket.getaddrinfo(domain, None, socket.AF_INET)}
+            result["A"] = sorted(ips)
         except Exception:
             result["A"] = []
+        try:
+            ips6 = {ai[4][0] for ai in socket.getaddrinfo(domain, None, socket.AF_INET6)}
+            result["AAAA"] = sorted(ips6)
+        except Exception:
+            result["AAAA"] = []
         # Extended records via dig if available
-        for rtype in ["MX", "TXT", "NS", "CNAME"]:
+        for rtype in ["MX", "TXT", "NS", "CNAME", "SOA"]:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     "dig", "+short", rtype, domain,
@@ -1301,20 +1308,62 @@ class DomainIntel:
 
     @staticmethod
     async def cert_transparency(session: aiohttp.ClientSession, domain: str) -> list[str]:
-        cached = cache.get(f"crt:{domain}")
+        """Multi-source passive subdomain enumeration.
+        Queries several free sources in parallel and merges — no single point
+        of failure (crt.sh alone is frequently slow/blocked)."""
+        cached = cache.get(f"subs:{domain}")
         if cached:
             return cached
-        data = await fetch(session, f"https://crt.sh/?q=%.{domain}&output=json")
-        subdomains = set()
-        if isinstance(data, list):
-            for entry in data:
-                name = entry.get("name_value", "")
-                for sub in name.splitlines():
-                    sub = sub.strip().lstrip("*.")
-                    if sub.endswith(domain):
-                        subdomains.add(sub)
-        result = sorted(subdomains)
-        cache.set(f"crt:{domain}", result)
+
+        subs = set()
+
+        async def _crtsh():
+            d = await fetch(session, f"https://crt.sh/?q=%.{domain}&output=json")
+            if isinstance(d, list):
+                for e in d:
+                    for s in (e.get("name_value", "") or "").splitlines():
+                        yield_s = s.strip().lstrip("*.").lower()
+                        if yield_s.endswith(domain):
+                            subs.add(yield_s)
+
+        async def _hackertarget():
+            d = await fetch(session, f"https://api.hackertarget.com/hostsearch/?q={domain}")
+            if isinstance(d, str) and "," in d and "error" not in d.lower():
+                for line in d.splitlines():
+                    host = line.split(",")[0].strip().lower()
+                    if host.endswith(domain):
+                        subs.add(host)
+
+        async def _otx():
+            d = await fetch(session,
+                f"https://otx.alienvault.com/api/v1/indicators/domain/{domain}/passive_dns")
+            if isinstance(d, dict):
+                for rec in d.get("passive_dns", []):
+                    h = (rec.get("hostname", "") or "").strip().lower()
+                    if h.endswith(domain):
+                        subs.add(h)
+
+        async def _rapiddns():
+            d = await fetch(session, f"https://rapiddns.io/subdomain/{domain}?full=1")
+            if isinstance(d, str):
+                for m in re.findall(rf"[\w.-]+\.{re.escape(domain)}", d):
+                    subs.add(m.lower())
+
+        async def _threatcrowd():
+            d = await fetch(session,
+                f"https://www.threatcrowd.org/searchApi/v2/domain/report/?domain={domain}")
+            if isinstance(d, dict):
+                for h in d.get("subdomains", []):
+                    h = (h or "").strip().lower()
+                    if h.endswith(domain):
+                        subs.add(h)
+
+        await asyncio.gather(_crtsh(), _hackertarget(), _otx(),
+                             _rapiddns(), _threatcrowd(),
+                             return_exceptions=True)
+
+        result = sorted(subs)
+        cache.set(f"subs:{domain}", result)
         return result
 
     @staticmethod
@@ -2058,6 +2107,156 @@ def _render_phone_panels(target: str, data: dict):
     print()
 
 
+# ── Boxed-panel renderers for the other modules (match phone module) ──
+
+_CG = "\033[38;5;46m"; _CO = "\033[38;5;208m"; _CC = "\033[38;5;51m"
+_CY = "\033[38;5;226m"; _CRED = "\033[38;5;196m"; _CW = "\033[38;5;255m"
+_CD = "\033[38;5;240m"; _CP = "\033[38;5;213m"; _CR = "\033[0m"
+
+
+def _render_ip_panels(target: str, data: dict):
+    geo = data.get("geo", {})
+    rows = [
+        ("IP",       f"{_CC}{data.get('ip', target)}{_CR}"),
+        ("City",     f"{_CW}{geo.get('city') or '?'}, {geo.get('region') or ''}{_CR}"),
+        ("Country",  f"{_CW}{geo.get('country') or '?'}{_CR}"),
+        ("Org / ASN",f"{_CY}{geo.get('org') or '?'}{_CR}"),
+        ("Coords",   f"{_CC}{geo.get('loc') or '?'}{_CR}"),
+        ("Timezone", f"{_CW}{geo.get('timezone') or '?'}{_CR}"),
+    ]
+    if geo.get("hostname"):
+        rows.append(("Hostname", f"{_CW}{geo['hostname']}{_CR}"))
+    print()
+    print(_panel("IP Intelligence", rows, width=80,
+                 border_color=_CG, title_color=_CG))
+
+    pv = data.get("proxy_vpn", {})
+    if pv:
+        flag = pv.get("vpn") or pv.get("proxy")
+        rows_pv = [
+            ("Proxy",  f"{_CRED}YES{_CR}" if pv.get("proxy") else f"{_CG}no{_CR}"),
+            ("VPN/Tor",f"{_CRED}YES — {pv.get('type')}{_CR}" if pv.get("vpn") else f"{_CG}no{_CR}"),
+            ("Provider",f"{_CW}{pv.get('provider') or '—'}{_CR}"),
+            ("ISP",    f"{_CW}{pv.get('isp') or '—'}{_CR}"),
+        ]
+        print(_panel("Anonymity / Reputation", rows_pv, width=80,
+                     border_color=(_CRED if flag else _CO),
+                     title_color=(_CRED if flag else _CO)))
+
+    rdns = data.get("reverse_dns", [])
+    sh = data.get("shodan", {})
+    if rdns or (sh and sh.get("ports")):
+        rows_i = []
+        if rdns:
+            rows_i.append(("Reverse DNS", f"{_CC}{', '.join(rdns)}{_CR}"))
+        if sh.get("ports"):
+            rows_i.append(("Open Ports", f"{_CY}{', '.join(map(str, sh['ports']))}{_CR}"))
+        if sh.get("os"):
+            rows_i.append(("OS", f"{_CW}{sh['os']}{_CR}"))
+        if sh.get("vulns"):
+            rows_i.append(("CVEs", f"{_CRED}{', '.join(sh['vulns'][:8])}{_CR}"))
+        print(_panel("Infrastructure (Shodan / DNS)", rows_i, width=80,
+                     border_color=_CC, title_color=_CC))
+    print()
+
+
+def _render_domain_panels(target: str, data: dict):
+    dns = data.get("dns", {})
+    tech = data.get("tech", {})
+    whois = data.get("whois", {})
+
+    rows = [("Domain", f"{_CC}{data.get('domain', target)}{_CR}")]
+    if tech.get("server"):
+        rows.append(("Server", f"{_CW}{tech['server']}{_CR}"))
+    if tech.get("frameworks"):
+        rows.append(("Tech", f"{_CY}{', '.join(tech['frameworks'])}{_CR}"))
+    if whois.get("registrar"):
+        rows.append(("Registrar", f"{_CW}{whois['registrar']}{_CR}"))
+    if whois.get("created") or whois.get("registered"):
+        rows.append(("Registered", f"{_CW}{whois.get('created') or whois.get('registered')}{_CR}"))
+    print()
+    print(_panel("Domain Profile", rows, width=84,
+                 border_color=_CG, title_color=_CG))
+
+    if dns:
+        rows_dns = []
+        for rec in ("A", "AAAA", "MX", "NS", "TXT", "SOA"):
+            vals = dns.get(rec)
+            if vals:
+                shown = vals if isinstance(vals, list) else [vals]
+                rows_dns.append((rec, f"{_CW}{', '.join(map(str, shown[:4]))}{_CR}"
+                                       + (f" {_CD}(+{len(shown)-4}){_CR}" if len(shown) > 4 else "")))
+        if rows_dns:
+            print(_panel("DNS Records", rows_dns, width=84,
+                         border_color=_CO, title_color=_CO))
+
+    subs = data.get("subdomains", [])
+    if subs:
+        rows_s = [(f"{i+1}", f"{_CC}{s}{_CR}") for i, s in enumerate(subs[:15])]
+        title = f"Subdomains ({len(subs)} found)"
+        if len(subs) > 15:
+            rows_s.append(("…", f"{_CD}+{len(subs)-15} more in JSON report{_CR}"))
+        print(_panel(title, rows_s, width=84,
+                     border_color=_CP, title_color=_CP))
+    else:
+        print(_panel("Subdomains (0 found)",
+                     [("note", f"{_CD}no passive results — try again "
+                                f"(sources may be rate-limited){_CR}")],
+                     width=84, border_color=_CD, title_color=_CD))
+
+    way = data.get("wayback_snapshots", [])
+    if way:
+        rows_w = [(str(i+1), f"{_CD}{w.get('timestamp','')}  {w.get('original','')[:60]}{_CR}")
+                  for i, w in enumerate(way[:6])]
+        print(_panel(f"Wayback Snapshots ({len(way)})", rows_w, width=84,
+                     border_color=_CY, title_color=_CY))
+    print()
+
+
+def _render_username_panels(target: str, data: dict):
+    plats = data.get("platforms", [])
+    found = [r for r in plats if r.get("found")]
+    checked = len(plats)
+    rows = [(r["platform"], f"{_CG}✓{_CR} {_CD}{r['url']}{_CR}") for r in found]
+    if not rows:
+        rows = [("result", f"{_CD}not found on any of {checked} platforms{_CR}")]
+    print()
+    print(_panel(f"Username: {data.get('username', target)}  "
+                 f"— found on {len(found)}/{checked}",
+                 rows, width=90, border_color=_CG, title_color=_CG))
+    print()
+
+
+def _render_email_panels(target: str, data: dict):
+    hibp = data.get("hibp", {})
+    email = data.get("email", target)
+    local, _, domain = email.partition("@")
+    rows = [
+        ("Email",  f"{_CC}{email}{_CR}"),
+        ("Local",  f"{_CW}{local}{_CR}"),
+        ("Domain", f"{_CW}{domain}{_CR}"),
+    ]
+    print()
+    print(_panel("Email Profile", rows, width=80,
+                 border_color=_CG, title_color=_CG))
+
+    if hibp.get("breached"):
+        rows_b = [("Status", f"{_CRED}⚠ BREACHED — {hibp.get('breach_count')} breaches{_CR}")]
+        for b in hibp.get("breaches", [])[:8]:
+            rows_b.append((b.get("name", "?"), f"{_CD}{b.get('date','')}{_CR}"))
+        print(_panel("Breach Exposure (HIBP)", rows_b, width=80,
+                     border_color=_CRED, title_color=_CRED))
+    elif hibp:
+        print(_panel("Breach Exposure (HIBP)",
+                     [("Status", f"{_CG}no breaches found{_CR}")],
+                     width=80, border_color=_CG, title_color=_CG))
+    else:
+        print(_panel("Breach Exposure (HIBP)",
+                     [("Status", f"{_CD}skipped — add hibp_key in config.yaml{_CR}")],
+                     width=80, border_color=_CD, title_color=_CD))
+    print()
+
+
 async def main_async(args):
     config = load_config(args.config)
     config["graph"] = args.graph
@@ -2107,53 +2306,40 @@ async def main_async(args):
         t = item["target"]
         print(f"\n[{t['type'].upper()}] {t['value']}")
         if "error" in item:
-            print(f"  ERROR: {item['error']}")
-        else:
-            data = item.get("data", {})
-            if t["type"] == "ip":
-                geo = data.get("geo", {})
-                print(f"  Location : {geo.get('city')}, {geo.get('country')}")
-                print(f"  Org/ASN  : {geo.get('org')}")
-                pv = data.get("proxy_vpn", {})
-                if pv.get("vpn") or pv.get("proxy"):
-                    print(f"  VPN/Proxy: YES — {pv.get('type')} / {pv.get('provider')}")
-                rdns = data.get("reverse_dns", [])
-                if rdns:
-                    print(f"  RDNS     : {', '.join(rdns)}")
-                sh = data.get("shodan", {})
-                if sh.get("ports"):
-                    print(f"  Ports    : {sh['ports']}")
-                if sh.get("vulns"):
-                    print(f"  CVEs     : {sh['vulns']}")
-
-            elif t["type"] == "domain":
-                subs = data.get("subdomains", [])
-                print(f"  Subdomains: {len(subs)} found")
-                for s in subs[:10]:
-                    print(f"    - {s}")
-                tech = data.get("tech", {})
-                if tech.get("server"):
-                    print(f"  Server   : {tech['server']}")
-                if tech.get("frameworks"):
-                    print(f"  Tech     : {', '.join(tech['frameworks'])}")
-
-            elif t["type"] == "username":
-                found = [r for r in data.get("platforms", []) if r["found"]]
-                print(f"  Found on {len(found)} platforms:")
-                for r in found:
-                    print(f"    [{r['platform']}] {r['url']}")
-
-            elif t["type"] == "phone":
-                _render_phone_panels(t["value"], data)
-
-            elif t["type"] == "email":
-                hibp = data.get("hibp", {})
-                if hibp.get("breached"):
-                    print(f"  BREACHED : YES — {hibp.get('breach_count')} breaches")
-                    for b in hibp.get("breaches", [])[:5]:
-                        print(f"    - {b['name']} ({b['date']})")
-                else:
-                    print(f"  Breached : No breaches found")
+            print(f"  \033[38;5;196m✗ ERROR: {item['error']}\033[0m")
+            continue
+        data = item.get("data", {})
+        ttype = t["type"]
+        if ttype == "ip":
+            _render_ip_panels(t["value"], data)
+        elif ttype == "domain":
+            _render_domain_panels(t["value"], data)
+        elif ttype == "url":
+            exp = data.get("url_expansion", {})
+            if exp:
+                rows = [("Original", f"\033[38;5;51m{exp.get('original','')}\033[0m"),
+                        ("Final",    f"\033[38;5;46m{exp.get('final','')}\033[0m")]
+                for i, hop in enumerate(exp.get("chain", [])):
+                    rows.append((f"hop {i}", f"\033[38;5;240m{hop}\033[0m"))
+                print()
+                print(_panel("URL Redirect Chain", rows, width=90,
+                             border_color="\033[38;5;51m", title_color="\033[38;5;51m"))
+            if data.get("domain_intel"):
+                _render_domain_panels("", data["domain_intel"])
+        elif ttype == "username":
+            _render_username_panels(t["value"], data)
+        elif ttype == "phone":
+            _render_phone_panels(t["value"], data)
+        elif ttype == "email":
+            _render_email_panels(t["value"], data)
+        elif ttype == "image":
+            exif = data.get("exif", {})
+            rows = ([(k, f"\033[38;5;255m{v}\033[0m") for k, v in list(exif.items())[:20]]
+                    if isinstance(exif, dict) and exif
+                    else [("note", "\033[38;5;240mno EXIF metadata found\033[0m")])
+            print()
+            print(_panel("Image EXIF / GPS", rows, width=84,
+                         border_color="\033[38;5;213m", title_color="\033[38;5;213m"))
 
     print("\n" + "="*60)
     print(f"Full report saved to: {base}.json")
