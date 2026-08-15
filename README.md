@@ -50,6 +50,46 @@ Built for red teamers, bug bounty hunters, threat intel analysts, and DFIR pract
 
 ---
 
+## 🧭 The Honest-Intelligence Principle
+
+> **GhostBuster's core rule: never present a guess as a fact.**
+
+Most phone-OSINT tools happily print a `Carrier` field and call it a day. The problem — that field is almost always **wrong** in markets with Mobile Number Portability (MNP). GhostBuster is built to know the difference between *what it can prove* and *what it's guessing*, and to **say so out loud**.
+
+Every finding is sorted into one of three confidence tiers:
+
+| Tier | Meaning | Example fields |
+|------|---------|----------------|
+| ✅ **Verified** | Algorithmically certain or MNP-proof | Validity, line type, number formats, **telecom circle / state** |
+| ⚠️ **Stale-risk** | Real data, but may be out of date | `Carrier (current)` from a live API — labelled with its source |
+| ❌ **Unknowable (free)** | No free/legal source can determine this | Live carrier of a ported number, GPS coordinates |
+
+### What this looks like in practice
+
+GhostBuster was hardened against **real Indian numbers**, and each edge case taught it to be more honest:
+
+- **Number ported to a new operator (MNP)** → shows `Carrier (current): Jio` from a live provider **and** `↳ MNP: ported — originally Airtel`. It never conflates the *original allocation* (from static number-series data) with the *current network*.
+- **Provider names a defunct operator** (e.g. Aircel, shut down 2018) → GhostBuster refuses to parrot it: `Carrier (current): unknown — definitely ported`, with a `↳ why` note. A dead operator provably can't be the current one.
+- **Jio / pan-India series** (numbers not bound to a geographic circle) → the built-in geocoder's guess is **suppressed**: `Region: unknown (Jio/MNP number — not geo-bound)`, rather than confidently printing a wrong city.
+- **Circle-bound legacy series** (older Airtel/Vodafone/BSNL) → resolves reliably to the **state/circle** (e.g. *UP East*), marked `✓ reliable (MNP-proof)`, because the circle is intrinsic to the number series and survives porting.
+
+### Why circle (state) is trustworthy but carrier isn't
+
+An Indian mobile number's **first four digits** encode the telecom **circle** it was originally allocated in. MNP lets you change *operator*, but **not** your number — so the circle stays valid for the life of the number. That's why GhostBuster reports **state/region with confidence** while treating **current carrier as best-effort**.
+
+### The multi-provider consensus engine
+
+For fields it *can* improve, GhostBuster runs every configured provider in parallel and **votes**:
+
+- **Validity & line type** — majority vote across all sources → confidence %.
+- **Carrier** — resolved from **live API providers only** (they track ported numbers); static offline data is kept *separately* as "original allocation" so it can't drag a correct answer into a false dispute.
+
+More provider keys = higher confidence and better tie-breaking. Zero keys still works — you just get the offline tier with honest "add a key for live data" prompts.
+
+> **Bottom line:** if GhostBuster prints it as a fact, you can cite it. If it's a guess, it's labelled a guess. That's the whole philosophy.
+
+---
+
 ## ✨ Feature Matrix
 
 <table>
