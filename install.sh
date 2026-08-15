@@ -32,6 +32,22 @@ fi
 echo -e "${_G}[+]${_R} Installing remaining Python deps via pip ${PIP_ARGS}"
 python3 -m pip install --user $PIP_ARGS -r requirements.txt
 
+# Install a `ghostbuster` shim on PATH
+INSTALL_DIR="$(pwd)"
+WRAPPER="/usr/local/bin/ghostbuster"
+echo -e "${_G}[+]${_R} Installing 'ghostbuster' command to ${WRAPPER}"
+sudo tee "$WRAPPER" > /dev/null <<EOF
+#!/usr/bin/env bash
+exec python3 "$INSTALL_DIR/ghostbuster.py" "\$@"
+EOF
+sudo chmod +x "$WRAPPER"
+
 echo ""
 echo -e "${_G}✔ Install complete!${_R}"
-echo -e "${_D}Try:${_R} ${_O}python3 ghostbuster.py investigate ip 1.1.1.1${_R}"
+echo ""
+echo -e "${_D}Try any of:${_R}"
+echo -e "  ${_O}ghostbuster 1.1.1.1${_R}                ${_D}# auto-detects IP${_R}"
+echo -e "  ${_O}ghostbuster example.com${_R}            ${_D}# auto-detects domain${_R}"
+echo -e "  ${_O}ghostbuster +911234567890${_R}          ${_D}# auto-detects phone${_R}"
+echo -e "  ${_O}ghostbuster user@example.com${_R}       ${_D}# auto-detects email${_R}"
+echo -e "  ${_O}ghostbuster --bulk targets.txt${_R}     ${_D}# bulk mode${_R}"

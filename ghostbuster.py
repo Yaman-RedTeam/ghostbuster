@@ -916,30 +916,43 @@ def parse_bulk_file(filepath: str) -> list[dict]:
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
+def detect_type(value: str) -> Optional[str]:
+    """Auto-detect target type from a raw value."""
+    v = value.strip()
+    if re.match(r'^https?://', v, re.IGNORECASE):
+        return "url"
+    if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', v):
+        return "ip"
+    if re.match(r'^[\w.+-]+@[\w-]+\.[a-z]{2,}$', v, re.IGNORECASE):
+        return "email"
+    if re.match(r'^\+?\d[\d\s\-().]{6,}$', v):
+        return "phone"
+    if v.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff")) \
+            or Path(v).is_file():
+        return "image"
+    if "." in v and " " not in v and not v.startswith("@"):
+        return "domain"
+    return "username"
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ghostbuster",
         description="GhostBuster OSINT Framework — authorized penetration testing tool",
+        epilog="Simple usage:  ghostbuster <target>   (type auto-detected)\n"
+               "Explicit    :  ghostbuster phone +911234567890\n"
+               "Bulk        :  ghostbuster bulk targets.txt",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    sub = p.add_subparsers(dest="command", required=True)
-
-    # Single target
-    inv = sub.add_parser("investigate", aliases=["inv"], help="Investigate a single target")
-    inv.add_argument("type", choices=["ip","domain","url","username","email","phone","image"])
-    inv.add_argument("value", help="Target value")
-
-    # Bulk
-    bulk = sub.add_parser("bulk", help="Bulk processing from file")
-    bulk.add_argument("file", help="CSV/JSON/TXT file")
-
-    # Common options
-    for sp in [inv, bulk]:
-        sp.add_argument("-c", "--config", default="config.yaml")
-        sp.add_argument("-o", "--output", default="ghostbuster_report")
-        sp.add_argument("-f", "--format", choices=["json","xml","both"], default="json")
-        sp.add_argument("--graph", action="store_true")
-        sp.add_argument("--log-level", default="INFO")
-
+    p.add_argument("target", nargs="?", help="Target value (IP/domain/URL/email/phone/username/image) — type auto-detected")
+    p.add_argument("value",  nargs="?", help=argparse.SUPPRESS)  # for explicit-type form: `ghostbuster phone +91...`
+    p.add_argument("--type", "-t", choices=["ip","domain","url","username","email","phone","image"],
+                   help="Force target type (skip auto-detection)")
+    p.add_argument("--bulk", "-b", metavar="FILE", help="Bulk process a CSV/JSON/TXT file")
+    p.add_argument("-c", "--config", default="config.yaml")
+    p.add_argument("-o", "--output", default="ghostbuster_report")
+    p.add_argument("-f", "--format", choices=["json","xml","both"], default="json")
+    p.add_argument("--graph", action="store_true", help="Render relationship PNG")
+    p.add_argument("--log-level", default="INFO")
     return p
 
 # ─── Rich boxed panel renderer (Numint-style) ───────────────────────────────
@@ -1063,10 +1076,23 @@ async def main_async(args):
     config["graph"] = args.graph
     setup_logging(level=args.log_level)
 
-    if args.command in ("investigate", "inv"):
-        targets = [{"type": args.type, "value": args.value}]
+    # Bulk mode
+    if args.bulk:
+        targets = parse_bulk_file(args.bulk)
+    # Explicit form:  ghostbuster phone +91...
+    elif args.target in ("ip","domain","url","username","email","phone","image") and args.value:
+        targets = [{"type": args.target, "value": args.value}]
+    # Simple form:    ghostbuster <value>  (auto-detect or --type)
+    elif args.target:
+        ttype = args.type or detect_type(args.target)
+        if not ttype:
+            log.error(f"Could not detect target type for: {args.target}")
+            sys.exit(1)
+        log.info(f"Auto-detected type: {ttype}")
+        targets = [{"type": ttype, "value": args.target}]
     else:
-        targets = parse_bulk_file(args.file)
+        build_parser().print_help()
+        sys.exit(1)
 
     if not targets:
         log.error("No targets to investigate")

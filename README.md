@@ -157,39 +157,30 @@ Drop keys into `config.yaml` — GhostBuster auto-detects and enables the module
 
 ## ⚡ Usage
 
-### Single-target investigations
+### 🎯 Simple mode — just pass a value, type is auto-detected
 
 ```bash
-# 🌐 IP → geo, ASN, VPN, Shodan
-python ghostbuster.py investigate ip 1.2.3.4
-
-# 🔗 Domain → DNS, WHOIS, subs, tech
-python ghostbuster.py investigate domain example.com
-
-# 🔍 URL → follow shorteners + full recon on landing
-python ghostbuster.py investigate url https://bit.ly/abc123
-
-# 👤 Username → 24+ platforms
-python ghostbuster.py investigate username target_handle
-
-# 📧 Email → breach check + permutations
-python ghostbuster.py investigate email target@example.com
-
-# 📞 Phone → carrier, region, line type
-python ghostbuster.py investigate phone +911234567890
-
-# 🖼️ Image → EXIF + GPS
-python ghostbuster.py investigate image photo.jpg
+ghostbuster 1.2.3.4                    # → IP intel
+ghostbuster example.com                # → domain forensics
+ghostbuster https://bit.ly/abc123      # → URL expansion + recon
+ghostbuster +911234567890              # → phone OSINT
+ghostbuster user@example.com           # → email breach check
+ghostbuster photo.jpg                  # → EXIF / GPS
+ghostbuster johndoe                    # → username hunt (24+ platforms)
 ```
 
-### Bulk processing
+### 🎛️ Explicit mode — force a type (useful for ambiguous inputs)
 
 ```bash
-# Auto-detect types from a TXT file
-python ghostbuster.py bulk targets.txt
+ghostbuster --type username johndoe
+ghostbuster phone +911234567890        # positional form also works
+```
 
-# CSV with explicit types + graph output
-python ghostbuster.py bulk targets.csv --format both --graph
+### 📦 Bulk mode
+
+```bash
+ghostbuster --bulk targets.txt                          # auto-type per line
+ghostbuster --bulk targets.csv --format both --graph    # CSV + graph PNG
 ```
 
 ---
@@ -198,6 +189,8 @@ python ghostbuster.py bulk targets.csv --format both --graph
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `-t, --type` | Force target type (skip auto-detect) | auto |
+| `-b, --bulk` | Bulk-process file (CSV/JSON/TXT) | — |
 | `-c, --config` | Config file path | `config.yaml` |
 | `-o, --output` | Output basename | `ghostbuster_report` |
 | `-f, --format` | `json` \| `xml` \| `both` | `json` |
