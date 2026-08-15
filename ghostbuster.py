@@ -746,16 +746,28 @@ class PhoneIntel:
     }
 
     OSINT_ENGINES = [
+        # Search engines
         ("Google",     "https://www.google.com/search?q=%22{q}%22"),
         ("DuckDuckGo", "https://duckduckgo.com/?q=%22{q}%22"),
         ("Bing",       "https://www.bing.com/search?q=%22{q}%22"),
         ("Yandex",     "https://yandex.com/search/?text=%22{q}%22"),
+        ("Brave",      "https://search.brave.com/search?q=%22%2B{q}%22"),
+        ("Startpage",  "https://www.startpage.com/sp/search?query=%22%2B{q}%22"),
+        # Social
         ("Facebook",   "https://www.facebook.com/search/top/?q={q}"),
         ("LinkedIn",   "https://www.linkedin.com/search/results/all/?keywords={q}"),
         ("Twitter/X",  "https://twitter.com/search?q=%22{q}%22"),
-        ("Truecaller", "https://www.truecaller.com/search/{cc}/{nat}"),
-        ("Pastebin",   "https://www.google.com/search?q=site%3Apastebin.com+%22{q}%22"),
-        ("GitHub",     "https://github.com/search?q=%22{q}%22&type=code"),
+        # Reverse-lookup services (many render their own maps in-page)
+        ("Truecaller",  "https://www.truecaller.com/search/{cc}/{nat}"),
+        ("Sync.me",     "https://sync.me/search/?number=%2B{q}"),
+        ("Whitepages",  "https://www.whitepages.com/phone/{whitepages}"),
+        ("Spydialer",   "https://www.spydialer.com/default.aspx?rp={nat}"),
+        ("Spokeo",      "https://www.spokeo.com/{q}"),
+        ("BeenVerified","https://www.beenverified.com/rf/search/phone?phone={q}"),
+        ("NumLookup",   "https://www.numlookup.com/{q}"),
+        # Leak / code hunts
+        ("Pastebin",    "https://www.google.com/search?q=site%3Apastebin.com+%22{q}%22"),
+        ("GitHub",      "https://github.com/search?q=%22{q}%22&type=code"),
     ]
 
     @staticmethod
@@ -765,11 +777,20 @@ class PhoneIntel:
     @staticmethod
     def _osint_links(e164: str, country_code: int, national: str) -> list[dict]:
         q = e164.replace("+", "")
-        return [
-            {"engine": name,
-             "url": url.format(q=q, cc=country_code, nat=national)}
-            for name, url in PhoneIntel.OSINT_ENGINES
-        ]
+        # Whitepages needs 1-717-278-9539 style
+        if country_code == 1 and len(national) == 10:
+            whitepages = f"1-{national[:3]}-{national[3:6]}-{national[6:]}"
+        else:
+            whitepages = f"{country_code}-{national}"
+        out = []
+        for name, url in PhoneIntel.OSINT_ENGINES:
+            try:
+                out.append({"engine": name,
+                            "url": url.format(q=q, cc=country_code, nat=national,
+                                              whitepages=whitepages)})
+            except KeyError:
+                pass
+        return out
 
     @staticmethod
     def _format_variants(parsed) -> dict:
@@ -796,6 +817,101 @@ class PhoneIntel:
             "sms":       f"sms:{e164}",
             "tel":       f"tel:{e164}",
         }
+
+    @staticmethod
+    async def _run_provider(session, name: str, url: str, api_key: str = None,
+                             headers: dict = None) -> dict:
+        """Run one phone-lookup provider, return {status, ms, data|error}."""
+        import time
+        t0 = time.perf_counter()
+        try:
+            hdrs = headers or {}
+            async with session.get(url, headers=hdrs, ssl=False,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as r:
+                ms = int((time.perf_counter() - t0) * 1000)
+                if r.status == 200:
+                    try:
+                        js = await r.json(content_type=None)
+                        return {"status": "ran", "ms": ms, "http": r.status, "data": js}
+                    except Exception:
+                        txt = await r.text()
+                        return {"status": "ran", "ms": ms, "http": r.status,
+                                "data": txt[:500]}
+                return {"status": "error", "ms": ms, "http": r.status,
+                        "error": f"HTTP {r.status}"}
+        except Exception as e:
+            ms = int((time.perf_counter() - t0) * 1000)
+            return {"status": "error", "ms": ms, "error": str(e)[:120]}
+
+    @staticmethod
+    async def run_providers(session, e164: str, national: str, cc: int,
+                             cfg: dict) -> dict:
+        """Fan-out to every configured phone-lookup API in parallel.
+        All providers are optional; missing keys → provider is skipped."""
+        num_no_plus = e164.replace("+", "")
+        providers = []
+
+        # Offline (phonenumbers library) — always runs
+        providers.append(("offline",
+            "internal://phonenumbers", None, None))
+
+        # Numverify (apilayer) — key required
+        if cfg.get("numverify_key"):
+            providers.append(("numverify",
+                f"http://apilayer.net/api/validate?access_key={cfg['numverify_key']}"
+                f"&number={num_no_plus}&country_code=&format=1", None, None))
+
+        # AbstractAPI phone-validation — key required
+        if cfg.get("abstractapi_key"):
+            providers.append(("abstractapi",
+                f"https://phonevalidation.abstractapi.com/v1/?api_key="
+                f"{cfg['abstractapi_key']}&phone={num_no_plus}", None, None))
+
+        # NumLookupAPI — key required
+        if cfg.get("numlookupapi_key"):
+            providers.append(("numlookupapi",
+                f"https://api.numlookupapi.com/v1/validate/{num_no_plus}",
+                None, {"apikey": cfg["numlookupapi_key"]}))
+
+        # Veriphone — key required
+        if cfg.get("veriphone_key"):
+            providers.append(("veriphone",
+                f"https://api.veriphone.io/v2/verify?phone={num_no_plus}"
+                f"&key={cfg['veriphone_key']}", None, None))
+
+        # IPQualityScore — key required
+        if cfg.get("ipqs_key"):
+            providers.append(("ipqs",
+                f"https://ipqualityscore.com/api/json/phone/"
+                f"{cfg['ipqs_key']}/{num_no_plus}", None, None))
+
+        # Twilio Lookup — sid+token
+        if cfg.get("twilio_sid") and cfg.get("twilio_token"):
+            import base64
+            tok = base64.b64encode(
+                f"{cfg['twilio_sid']}:{cfg['twilio_token']}".encode()).decode()
+            providers.append(("twilio",
+                f"https://lookups.twilio.com/v2/PhoneNumbers/{e164}"
+                f"?Fields=line_type_intelligence", None,
+                {"Authorization": f"Basic {tok}"}))
+
+        # Kick them all off in parallel
+        results = {}
+        tasks = []
+        for name, url, _, hdrs in providers:
+            if name == "offline":
+                results[name] = {"status": "ran", "ms": 1,
+                                 "data": "phonenumbers (bundled)"}
+            else:
+                tasks.append((name, PhoneIntel._run_provider(session, name, url,
+                                                             headers=hdrs)))
+        if tasks:
+            done = await asyncio.gather(*(t for _, t in tasks),
+                                        return_exceptions=True)
+            for (name, _), r in zip(tasks, done):
+                results[name] = r if not isinstance(r, Exception) \
+                    else {"status": "error", "error": str(r)[:120]}
+        return results
 
     @staticmethod
     async def _check_messenger_presence(session, e164: str) -> dict:
@@ -831,7 +947,8 @@ class PhoneIntel:
         return hints
 
     @staticmethod
-    async def analyze(raw: str, session: aiohttp.ClientSession = None) -> dict:
+    async def analyze(raw: str, session: aiohttp.ClientSession = None,
+                       config: dict = None) -> dict:
         if not PHONE_AVAILABLE:
             return {"error": "phonenumbers library not installed"}
         try:
@@ -926,6 +1043,10 @@ class PhoneIntel:
         if session is not None:
             result["messenger_presence"] = \
                 await PhoneIntel._check_messenger_presence(session, fmts["e164"])
+            result["providers"] = await PhoneIntel.run_providers(
+                session, fmts["e164"], national_str, parsed.country_code,
+                config or {}
+            )
 
         return result
 
@@ -1356,7 +1477,7 @@ class GhostBusterEngine:
 
     async def investigate_phone(self, session, phone: str) -> dict:
         log.info(f"[PHONE] Analyzing {phone}")
-        return await PhoneIntel.analyze(phone, session)
+        return await PhoneIntel.analyze(phone, session, self.config)
 
     async def run(self, targets: list[dict]) -> dict:
         connector = aiohttp.TCPConnector(limit=50, ssl=False)
@@ -1634,6 +1755,27 @@ def _render_phone_panels(target: str, data: dict):
                 rows3.append((name.capitalize(), f"{D}{msg[name]}{R}"))
         print(_panel("Messenger Presence & Pivots", rows3, width=72,
                      border_color=C, title_color=C))
+
+    # ── Panel: Provider Status (like Numint) ──
+    provs = data.get("providers", {})
+    if provs:
+        rows_p = []
+        for name in sorted(provs.keys()):
+            r = provs[name]
+            st = r.get("status", "?")
+            ms = r.get("ms")
+            if st == "ran":
+                mark = f"{G}● ran{R}"
+                detail = f"{D}{ms} ms{R}" if ms is not None else ""
+            elif st == "skipped":
+                mark = f"{D}○ skipped{R}"
+                detail = f"{D}{r.get('reason','no api key')}{R}"
+            else:
+                mark = f"{RED}✗ error{R}"
+                detail = f"{D}{r.get('error','?')[:50]}{R}"
+            rows_p.append((name, f"{mark}   {detail}"))
+        print(_panel("Provider Status", rows_p, width=72,
+                     border_color=W, title_color=W))
 
     # ── Panel 4: OSINT Search Links ──
     dorks = data.get("osint_dorks", [])

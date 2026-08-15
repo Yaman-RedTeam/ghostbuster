@@ -1,9 +1,18 @@
 # GhostBuster — Configuration Example
 # Copy to config.yaml and fill in your API keys
 
-# API Keys (optional — enhanced results when provided)
-shodan_key: ""       # https://account.shodan.io/
-hibp_key: ""         # https://haveibeenpwned.com/API/Key
+# API Keys (all optional — providers auto-run only if key present)
+shodan_key: ""            # https://account.shodan.io/
+hibp_key: ""              # https://haveibeenpwned.com/API/Key
+
+# Phone intelligence providers (Numint-style multi-provider aggregation)
+numverify_key: ""         # https://numverify.com/          (100 free/mo)
+abstractapi_key: ""       # https://app.abstractapi.com/    (100 free/mo)
+numlookupapi_key: ""      # https://numlookupapi.com/       (100 free/mo)
+veriphone_key: ""         # https://veriphone.io/           (1000 free/mo)
+ipqs_key: ""              # https://ipqualityscore.com/     (200 free/mo)
+twilio_sid: ""            # https://twilio.com  Lookup API v2
+twilio_token: ""          #     (SID + Auth Token pair)
 
 # Proxy (optional)
 proxy: null          # "http://host:port" or "socks5://host:port"
