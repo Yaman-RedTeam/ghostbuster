@@ -1124,59 +1124,76 @@ class PhoneIntel:
 
     @staticmethod
     def compute_consensus(providers: dict, offline_hint: dict = None) -> dict:
-        """Majority-vote across all providers → carrier/type/valid + confidence."""
-        from collections import Counter
-        votes_carrier, votes_type, votes_valid = Counter(), Counter(), Counter()
-        sources = {"carrier": {}, "line_type": {}}
+        """Aggregate providers → carrier/type/valid + confidence.
 
-        def cast(src_name, fields):
-            if fields.get("carrier"):
-                votes_carrier[fields["carrier"]] += 1
-                sources["carrier"].setdefault(fields["carrier"], []).append(src_name)
+        Carrier is special: live API providers (veriphone etc.) query a
+        maintained DB that DOES track ported numbers, so they reflect the
+        CURRENT operator far better than the offline static series data.
+        Real-world testing (multiple UP-East numbers ported to Jio) showed
+        the live API right and offline wrong every time. So carrier is
+        resolved from LIVE PROVIDERS ONLY; offline is kept separately as
+        the 'original allocation', never mixed into the carrier vote.
+        Validity + line_type are stable and voted across everyone.
+        """
+        from collections import Counter
+        votes_type, votes_valid = Counter(), Counter()
+        live_carrier = Counter()          # real API providers only
+        live_sources = {}
+
+        def vote_stable(fields):
             if fields.get("line_type"):
                 votes_type[fields["line_type"]] += 1
-                sources["line_type"].setdefault(fields["line_type"], []).append(src_name)
             v = fields.get("valid")
             if v is not None:
                 votes_valid[bool(v)] += 1
 
-        # Real providers
+        # Live API providers → authoritative for carrier
         for name, r in (providers or {}).items():
             if name == "offline" or r.get("status") != "ran":
                 continue
-            cast(name, PhoneIntel._extract_fields(name, r.get("data")))
-        # Offline as a lower-weight voter (labelled)
+            f = PhoneIntel._extract_fields(name, r.get("data"))
+            vote_stable(f)
+            if f.get("carrier"):
+                live_carrier[f["carrier"]] += 1
+                live_sources.setdefault(f["carrier"], []).append(name)
+
+        # Offline → only feeds validity/line_type + kept as original alloc
+        original_alloc = None
         if offline_hint:
-            cast("offline", {"carrier": PhoneIntel._norm_carrier(offline_hint.get("carrier")),
-                             "line_type": (offline_hint.get("line_type") or "").lower() or None,
-                             "valid": offline_hint.get("valid")})
+            vote_stable({"line_type": (offline_hint.get("line_type") or "").lower() or None,
+                         "valid": offline_hint.get("valid")})
+            original_alloc = PhoneIntel._norm_carrier(offline_hint.get("carrier"))
 
         def top(counter):
             if not counter:
                 return None, 0, 0
             item, n = counter.most_common(1)[0]
-            total = sum(counter.values())
-            return item, n, total
+            return item, n, sum(counter.values())
 
-        c_val, c_n, c_tot = top(votes_carrier)
+        car_val, car_n, car_tot = top(live_carrier)
         t_val, t_n, t_tot = top(votes_type)
         v_val, v_n, v_tot = top(votes_valid)
 
         def conf(n, tot):
             return round(100 * n / tot) if tot else 0
 
+        # Did the live API disagree with the original allocation? (= ported)
+        ported = bool(car_val and original_alloc and car_val != original_alloc)
+
         return {
             "carrier": {
-                "value": c_val, "votes": c_n, "total": c_tot,
-                "confidence": conf(c_n, c_tot),
-                "sources": sources["carrier"].get(c_val, []),
-                "disputed": len(votes_carrier) > 1,
-                "all": dict(votes_carrier),
+                "value": car_val,                       # live/current best-guess
+                "confidence": conf(car_n, car_tot),
+                "sources": live_sources.get(car_val, []),
+                "has_live": car_val is not None,
+                "original_alloc": original_alloc,
+                "ported": ported,
+                "all": dict(live_carrier),
+                "disputed": len(live_carrier) > 1,
             },
             "line_type": {
                 "value": t_val, "votes": t_n, "total": t_tot,
                 "confidence": conf(t_n, t_tot),
-                "all": dict(votes_type),
             },
             "valid": {
                 "value": v_val, "votes": v_n, "total": v_tot,
@@ -1925,15 +1942,24 @@ def _render_phone_panels(target: str, data: dict):
             rows_c.append(("Line Type",
                 f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
         cc = con.get("carrier", {})
-        if cc.get("value"):
-            # Present as historical/registered, NOT current
-            rows_c.append(("Carrier (registered)",
-                f"{Y}{cc['value']}{R}  {RED}⚠ may be stale — MNP not reflected{R}"))
+        if cc.get("has_live"):
+            # Live API providers track ported numbers — treat as best current guess
+            pct = cc.get("confidence", 0)
+            srcs = ", ".join(cc.get("sources", []))
+            rows_c.append(("Carrier (current)",
+                f"{G}{cc['value']}{R}  {conf_color(pct)}{bar(pct)} {pct}%{R}  "
+                f"{D}via {srcs}{R}"))
+            if cc.get("ported") and cc.get("original_alloc"):
+                rows_c.append(("  ↳ MNP",
+                    f"{Y}ported{R} {D}— originally {cc['original_alloc']}{R}"))
             if cc.get("disputed"):
-                srcs = ", ".join(f"{k}" for k in cc.get("all", {}).keys())
-                rows_c.append(("  ↳ sources disagree", f"{D}{srcs}{R}"))
-            rows_c.append(("Carrier (live/current)",
-                f"{D}unknown — needs live HLR (not available in free sources){R}"))
+                allv = ", ".join(f"{k}({v})" for k, v in cc.get("all", {}).items())
+                rows_c.append(("  ↳ providers differ", f"{D}{allv}{R}"))
+        elif cc.get("original_alloc"):
+            # No live provider ran — only offline static data available
+            rows_c.append(("Carrier (original alloc)",
+                f"{Y}{cc['original_alloc']}{R}  "
+                f"{RED}⚠ static data — may be ported (add a provider key){R}"))
         if rows_c:
             print(_panel("⚡ VERIFIED FACTS  (what we can trust)", rows_c, width=94,
                          border_color="\033[38;5;201m",   # magenta
