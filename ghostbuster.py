@@ -1784,6 +1784,36 @@ def _render_phone_panels(target: str, data: dict):
         print(_panel("Provider Status", rows_p, width=72,
                      border_color=W, title_color=W))
 
+        # ── Panel: Provider Highlights (key fields per provider) ──
+        highlights = []
+        for name in sorted(provs.keys()):
+            r = provs[name]
+            if r.get("status") != "ran" or name == "offline":
+                continue
+            d = r.get("data")
+            if not isinstance(d, dict):
+                continue
+            # Common keys across providers, pick whichever exists
+            valid = d.get("phone_valid", d.get("valid"))
+            car   = d.get("carrier") or d.get("current_carrier", {}).get("name") \
+                    if isinstance(d.get("current_carrier"), dict) else d.get("carrier")
+            ptype = d.get("phone_type") or d.get("line_type")
+            country = d.get("country") or d.get("country_name")
+            spam  = d.get("fraud_score") or d.get("risky") or d.get("recent_abuse")
+            bits = []
+            if valid is not None:
+                bits.append(f"{G if valid else RED}valid={valid}{R}")
+            if car:      bits.append(f"{C}{car}{R}")
+            if ptype:    bits.append(f"{Y}{ptype}{R}")
+            if country:  bits.append(f"{W}{country}{R}")
+            if spam is not None and spam:
+                bits.append(f"{RED}spam:{spam}{R}")
+            if bits:
+                highlights.append((name, "  ".join(bits)))
+        if highlights:
+            print(_panel("Provider Highlights", highlights, width=90,
+                         border_color=C, title_color=C))
+
     # ── Panel 4: OSINT Search Links ──
     dorks = data.get("osint_dorks", [])
     if dorks:
