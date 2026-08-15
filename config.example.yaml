@@ -1,0 +1,16 @@
+# GhostBuster — Configuration Example
+# Copy to config.yaml and fill in your API keys
+
+# API Keys (optional — enhanced results when provided)
+shodan_key: ""       # https://account.shodan.io/
+hibp_key: ""         # https://haveibeenpwned.com/API/Key
+
+# Proxy (optional)
+proxy: null          # "http://host:port" or "socks5://host:port"
+
+# Output
+output_format: "json"   # json | xml | both
+graph: false
+
+# Logging
+log_level: "INFO"        # DEBUG | INFO | WARNING | ERROR

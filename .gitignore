@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+env/
+
+# Reports & cache (don't commit)
+*.json
+*.xml
+*.png
+axiom_cache.db
+ghostbuster_cache.db
+*.log
+
+# Config with API keys — NEVER commit
+config.yaml
+
+# Keep example config
+!config.example.yaml
