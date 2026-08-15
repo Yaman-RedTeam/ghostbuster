@@ -269,7 +269,7 @@ Copy `config.example.yaml` → `config.yaml` and drop your keys in.
 └──────────────────────┬────────────────────────────┘
                        │
         ┌──────────────▼──────────────┐
-        │      AxiomEngine (async)    │
+        │      GhostBusterEngine (async)    │
         │  • Task dispatch            │
         │  • Rate-limit + retry       │
         │  • SQLite cache             │

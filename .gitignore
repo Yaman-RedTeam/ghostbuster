@@ -9,7 +9,7 @@ env/
 *.json
 *.xml
 *.png
-axiom_cache.db
+ghostbuster_cache.db
 ghostbuster_cache.db
 *.log
 
@@ -18,3 +18,5 @@ config.yaml
 
 # Keep example config
 !config.example.yaml
+ghostbuster.log
+ghostbuster_report.*

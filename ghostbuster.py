@@ -47,8 +47,8 @@ except ImportError:
 
 # ─── Logging Setup ──────────────────────────────────────────────────────────
 
-def setup_logging(log_file: str = "axiom_osint.log", level: str = "INFO"):
-    logger = logging.getLogger("axiom")
+def setup_logging(log_file: str = "ghostbuster.log", level: str = "INFO"):
+    logger = logging.getLogger("ghostbuster")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
@@ -66,7 +66,7 @@ log = setup_logging()
 # ─── Cache (SQLite) ──────────────────────────────────────────────────────────
 
 class Cache:
-    def __init__(self, db_path: str = "axiom_cache.db"):
+    def __init__(self, db_path: str = "ghostbuster_cache.db"):
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS cache (
@@ -467,7 +467,7 @@ class IdentityIntel:
 
     @staticmethod
     async def hibp_check(session: aiohttp.ClientSession, email: str, api_key: str = "") -> dict:
-        headers = {"hibp-api-key": api_key, "User-Agent": "AXIOM-OSINT"}
+        headers = {"hibp-api-key": api_key, "User-Agent": "GhostBuster-OSINT"}
         encoded = email.replace("@", "%40")
         data = await fetch(session,
             f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=false",
@@ -542,7 +542,7 @@ class GraphBuilder:
         if self.G:
             self.G.add_edge(src, dst, label=label)
 
-    def render(self, output: str = "axiom_graph.png"):
+    def render(self, output: str = "ghostbuster_graph.png"):
         if not GRAPH_AVAILABLE:
             log.warning("networkx/matplotlib not installed — skipping graph")
             return
@@ -584,7 +584,7 @@ class Reporter:
                 else:
                     child.text = str(v) if v is not None else ""
 
-        root = ET.Element("axiom_report")
+        root = ET.Element("ghostbuster_report")
         dict_to_xml(data, root)
         tree = ET.ElementTree(root)
         ET.indent(tree, space="  ")
@@ -593,7 +593,7 @@ class Reporter:
 
 # ─── Core Investigation Engine ────────────────────────────────────────────────
 
-class AxiomEngine:
+class GhostBusterEngine:
     def __init__(self, config: dict):
         self.config = config
         self.graph = GraphBuilder()
@@ -722,7 +722,7 @@ class AxiomEngine:
 
 # ─── Config Loader ────────────────────────────────────────────────────────────
 
-def load_config(path: str = "axiom_config.yaml") -> dict:
+def load_config(path: str = "config.yaml") -> dict:
     defaults = {
         "shodan_key": "",
         "hibp_key": "",
@@ -795,7 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Common options
     for sp in [inv, bulk]:
-        sp.add_argument("-c", "--config", default="axiom_config.yaml")
+        sp.add_argument("-c", "--config", default="config.yaml")
         sp.add_argument("-o", "--output", default="ghostbuster_report")
         sp.add_argument("-f", "--format", choices=["json","xml","both"], default="json")
         sp.add_argument("--graph", action="store_true")
@@ -818,7 +818,7 @@ async def main_async(args):
         sys.exit(1)
 
     log.info(f"GhostBuster starting — {len(targets)} target(s)")
-    engine = AxiomEngine(config)
+    engine = GhostBusterEngine(config)
     findings = await engine.run(targets)
 
     fmt = args.format
