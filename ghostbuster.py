@@ -1836,10 +1836,12 @@ def _render_phone_panels(target: str, data: dict):
     if loc:
         rows_loc = []
         if loc.get("india_circle"):
-            rows_loc.append(("Circle",  f"{Y}📍 {loc['india_circle']} {D}(state/region){R}"))
+            rows_loc.append(("Circle",  f"{Y}📍 {loc['india_circle']} {G}✓ reliable "
+                                        f"{D}(MNP-proof){R}"))
             if loc.get("india_original_operator"):
-                rows_loc.append(("Original Op", f"{W}{loc['india_original_operator']} "
-                                                f"{D}(pre-MNP assignment){R}"))
+                rows_loc.append(("Operator (at launch)",
+                                 f"{D}{loc['india_original_operator']} — "
+                                 f"NOT the current carrier; likely ported (MNP){R}"))
         elif loc.get("specific_region"):
             rows_loc.append(("Region",  f"{Y}📍 {loc['specific_region']}{R}"))
         rows_loc.append(("Country",     f"{W}{loc.get('country_name','?')} "
