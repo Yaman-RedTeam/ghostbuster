@@ -1787,16 +1787,9 @@ def parse_bulk_file(filepath: str) -> list[dict]:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', line):
-                targets.append({"type": "ip", "value": line})
-            elif re.match(r'^https?://', line):
-                targets.append({"type": "url", "value": line})
-            elif re.match(r'^[\w.+-]+@[\w-]+\.[a-z]{2,}$', line, re.IGNORECASE):
-                targets.append({"type": "email", "value": line})
-            elif re.match(r'^\+?\d[\d\s\-().]{7,}$', line):
-                targets.append({"type": "phone", "value": line})
-            else:
-                targets.append({"type": "domain", "value": line})
+            # Reuse the same auto-detection as single-target mode for consistency
+            ttype = detect_type(line) or "domain"
+            targets.append({"type": ttype, "value": line})
     return targets
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────
