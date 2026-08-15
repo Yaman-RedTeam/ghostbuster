@@ -225,6 +225,72 @@ ghostbuster --bulk targets.csv --format both --graph    # CSV + graph PNG
 
 ---
 
+## 📸 Sample Output — Phone Intel
+
+A real run against an Indian mobile (a Veriphone key is set, so the live-carrier tier is active):
+
+```console
+$ ghostbuster +9193358XXXXX
+
+   ▄████  ██░ ██  ▒█████    ██████ ▄▄▄█████▓ ▄▄▄▄    █    ██   ██████ ▄▄▄█████▓▓█████  ██▀███
+  ██▒ ▀█▒▓██░ ██▒▒██▒  ██▒▒██    ▒ ▓  ██▒ ▓▒▓█████▄  ██  ▓██▒▒██    ▒ ▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒
+        ┌──────────────────────────────────────────────────────────┐
+        │  👻 GhostBuster • OSINT Reconnaissance Framework • v1.0.0 │
+        │  Developed by Yaman.RedTeam • Authorized Testing Only     │
+        └──────────────────────────────────────────────────────────┘
+
+╭──────────────────── Intelligence Profile ────────────────────╮
+│    Number  +9193358XXXXX                                     │
+│   Country  🇮🇳  India (IN · +91)                              │
+│      Type  mobile                                            │
+│  Validity  VALID                                            │
+│   Carrier  (original allocation, pre-MNP)                   │
+│  Timezone  Asia/Calcutta                                    │
+╰──────────────────────────────────────────────────────────────╯
+╭──────────────────── Location Intelligence ───────────────────╮
+│                Circle  📍 UP East ✓ reliable (MNP-proof)     │
+│  Operator (at launch)  Airtel — NOT the current carrier      │
+│               Country  India (IN)                            │
+╰──────────────────────────────────────────────────────────────╯
+╭─────────────── Messenger Presence & Pivots ──────────────────╮
+│  Whatsapp  ✓ reachable  (200)                                │
+│  Telegram  ✓ reachable  (200)                                │
+╰──────────────────────────────────────────────────────────────╯
+╭───────── ⚡ VERIFIED FACTS  (what we can trust) ─────────────╮
+│           Validity  VALID  ██████████ 100%                   │
+│          Line Type  mobile  ██████████ 100%                  │
+│  Carrier (current)  Jio  ██████████ 100%  via veriphone      │
+│              ↳ MNP  ported — originally Airtel               │
+╰──────────────────────────────────────────────────────────────╯
+╭──────────────────── Provider Status ─────────────────────────╮
+│    offline  ● ran      1 ms                                  │
+│  veriphone  ● ran   2696 ms                                  │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+Notice the honest-intelligence tiers in action: **circle** is `✓ reliable`, the **live carrier** (Jio) is separated from the **original allocation** (Airtel) with an explicit `ported` note, and nothing is presented as fact that the free tier can't actually prove.
+
+<details>
+<summary><b>Edge case: a number reporting a defunct operator</b></summary>
+
+```console
+$ ghostbuster +918565XXXXXX
+
+╭───────── ⚡ VERIFIED FACTS  (what we can trust) ─────────────╮
+│           Validity  VALID  ██████████ 100%                   │
+│          Line Type  mobile  ██████████ 100%                  │
+│  Carrier (current)  unknown — definitely ported             │
+│              ↳ why  veriphone says 'Aircel (defunct)' —      │
+│                     that operator is shut down              │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+Aircel shut down in 2018, so the number provably **cannot** be on Aircel now — GhostBuster refuses to parrot the stale answer and reports the truth: *definitely ported, current network unknowable from free sources.*
+
+</details>
+
+---
+
 ## 🎛️ CLI Options
 
 | Flag | Description | Default |
