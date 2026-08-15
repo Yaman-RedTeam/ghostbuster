@@ -9,7 +9,7 @@ env/
 *.json
 *.xml
 *.png
-ghostbuster_cache.db
+!assets/*.png          # ...but DO keep README screenshots
 ghostbuster_cache.db
 *.log
 
