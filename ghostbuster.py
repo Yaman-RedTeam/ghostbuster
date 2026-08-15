@@ -1050,12 +1050,117 @@ class PhoneIntel:
         if session is not None:
             result["messenger_presence"] = \
                 await PhoneIntel._check_messenger_presence(session, fmts["e164"])
-            result["providers"] = await PhoneIntel.run_providers(
+            providers = await PhoneIntel.run_providers(
                 session, fmts["e164"], national_str, parsed.country_code,
                 config or {}
             )
+            result["providers"] = providers
+            # Fold the offline circle data in as one more "voter"
+            offline_hint = {"carrier": india_operator or car,
+                            "line_type": line_type, "valid": valid}
+            result["consensus"] = PhoneIntel.compute_consensus(
+                providers, offline_hint)
 
         return result
+
+    # ── Provider field normalization ──
+    @staticmethod
+    def _norm_carrier(name: str) -> Optional[str]:
+        """Collapse carrier aliases to a canonical Indian-operator label."""
+        if not name:
+            return None
+        n = name.lower()
+        table = [
+            (("jio", "reliance jio"), "Jio"),
+            (("airtel", "bharti"), "Airtel"),
+            (("vi ", "vodafone", "idea", "vodafone idea", "vil"), "Vi (Vodafone-Idea)"),
+            (("bsnl",), "BSNL"),
+            (("mtnl",), "MTNL"),
+            (("telewings", "uninor", "telenor"), "Telewings/Uninor (legacy)"),
+            (("aircel",), "Aircel (defunct)"),
+        ]
+        for keys, label in table:
+            if any(k in n for k in keys):
+                return label
+        return name.strip()
+
+    @staticmethod
+    def _extract_fields(provider_name: str, data: Any) -> dict:
+        """Pull (carrier, line_type, valid) from any provider's raw payload."""
+        if not isinstance(data, dict):
+            return {}
+        car = data.get("carrier")
+        if not car and isinstance(data.get("current_carrier"), dict):
+            car = data["current_carrier"].get("name")
+        if not car and isinstance(data.get("original_carrier"), dict):
+            car = data["original_carrier"].get("name")
+        ltype = data.get("phone_type") or data.get("line_type") or data.get("type")
+        valid = data.get("phone_valid", data.get("valid", data.get("is_valid")))
+        return {"carrier": PhoneIntel._norm_carrier(car),
+                "line_type": (ltype or "").lower() or None,
+                "valid": valid}
+
+    @staticmethod
+    def compute_consensus(providers: dict, offline_hint: dict = None) -> dict:
+        """Majority-vote across all providers → carrier/type/valid + confidence."""
+        from collections import Counter
+        votes_carrier, votes_type, votes_valid = Counter(), Counter(), Counter()
+        sources = {"carrier": {}, "line_type": {}}
+
+        def cast(src_name, fields):
+            if fields.get("carrier"):
+                votes_carrier[fields["carrier"]] += 1
+                sources["carrier"].setdefault(fields["carrier"], []).append(src_name)
+            if fields.get("line_type"):
+                votes_type[fields["line_type"]] += 1
+                sources["line_type"].setdefault(fields["line_type"], []).append(src_name)
+            v = fields.get("valid")
+            if v is not None:
+                votes_valid[bool(v)] += 1
+
+        # Real providers
+        for name, r in (providers or {}).items():
+            if name == "offline" or r.get("status") != "ran":
+                continue
+            cast(name, PhoneIntel._extract_fields(name, r.get("data")))
+        # Offline as a lower-weight voter (labelled)
+        if offline_hint:
+            cast("offline", {"carrier": PhoneIntel._norm_carrier(offline_hint.get("carrier")),
+                             "line_type": (offline_hint.get("line_type") or "").lower() or None,
+                             "valid": offline_hint.get("valid")})
+
+        def top(counter):
+            if not counter:
+                return None, 0, 0
+            item, n = counter.most_common(1)[0]
+            total = sum(counter.values())
+            return item, n, total
+
+        c_val, c_n, c_tot = top(votes_carrier)
+        t_val, t_n, t_tot = top(votes_type)
+        v_val, v_n, v_tot = top(votes_valid)
+
+        def conf(n, tot):
+            return round(100 * n / tot) if tot else 0
+
+        return {
+            "carrier": {
+                "value": c_val, "votes": c_n, "total": c_tot,
+                "confidence": conf(c_n, c_tot),
+                "sources": sources["carrier"].get(c_val, []),
+                "disputed": len(votes_carrier) > 1,
+                "all": dict(votes_carrier),
+            },
+            "line_type": {
+                "value": t_val, "votes": t_n, "total": t_tot,
+                "confidence": conf(t_n, t_tot),
+                "all": dict(votes_type),
+            },
+            "valid": {
+                "value": v_val, "votes": v_n, "total": v_tot,
+                "confidence": conf(v_n, v_tot),
+            },
+        }
 
 # ─── Module 3: Domain & URL Forensics ────────────────────────────────────────
 
@@ -1762,6 +1867,46 @@ def _render_phone_panels(target: str, data: dict):
                 rows3.append((name.capitalize(), f"{D}{msg[name]}{R}"))
         print(_panel("Messenger Presence & Pivots", rows3, width=72,
                      border_color=C, title_color=C))
+
+    # ── Panel: CONSENSUS (majority-vote across all providers) ──
+    con = data.get("consensus", {})
+    if con:
+        def conf_color(pct):
+            if pct >= 75: return G
+            if pct >= 50: return Y
+            return RED
+        def bar(pct):
+            filled = round(pct / 10)
+            return "█" * filled + "░" * (10 - filled)
+
+        rows_c = []
+        cc = con.get("carrier", {})
+        if cc.get("value"):
+            pct = cc.get("confidence", 0)
+            col = conf_color(pct)
+            disp = f"{RED} ⚠ disputed{R}" if cc.get("disputed") else ""
+            rows_c.append(("Carrier",
+                f"{col}{cc['value']}{R}  {col}{bar(pct)} {pct}%{R}  "
+                f"{D}({cc.get('votes')}/{cc.get('total')} votes){R}{disp}"))
+            # Show the disagreement breakdown if disputed
+            if cc.get("disputed"):
+                for name, n in cc.get("all", {}).items():
+                    srcs = ", ".join(cc.get("sources", [])) if name == cc["value"] else ""
+                    rows_c.append(("  ↳", f"{D}{name}: {n} vote(s){R}"))
+        ct = con.get("line_type", {})
+        if ct.get("value"):
+            pct = ct.get("confidence", 0)
+            rows_c.append(("Line Type",
+                f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
+        cv = con.get("valid", {})
+        if cv.get("value") is not None:
+            pct = cv.get("confidence", 0)
+            vs = f"{G}VALID{R}" if cv["value"] else f"{RED}INVALID{R}"
+            rows_c.append(("Validity", f"{vs}  {D}{bar(pct)} {pct}%{R}"))
+        if rows_c:
+            print(_panel("⚡ CONSENSUS  (multi-provider vote)", rows_c, width=90,
+                         border_color="\033[38;5;201m",   # magenta
+                         title_color="\033[38;5;201m"))
 
     # ── Panel: Provider Status (like Numint) ──
     provs = data.get("providers", {})
