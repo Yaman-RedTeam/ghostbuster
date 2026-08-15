@@ -210,39 +210,178 @@ class IPIntel:
         cache.set(f"shodan:{ip}", result)
         return result
 
-# ─── Module 2: Phone Number Intelligence ─────────────────────────────────────
+# ─── Module 2: Phone Number Intelligence (Numint-style deep OSINT) ───────────
 
 class PhoneIntel:
-    """Phone parsing, carrier, geo, line type."""
+    """Deep phone OSINT — parse, carrier, geo, line type, messenger presence,
+    reputation, OSINT dorks, format variants. Inspired by Numint / PhoneInfoga."""
+
+    # Country → ISO2 flag (for a subset — extend as needed)
+    COUNTRY_FLAGS = {
+        1: "🇺🇸", 7: "🇷🇺", 20: "🇪🇬", 27: "🇿🇦", 30: "🇬🇷", 31: "🇳🇱",
+        32: "🇧🇪", 33: "🇫🇷", 34: "🇪🇸", 36: "🇭🇺", 39: "🇮🇹", 40: "🇷🇴",
+        41: "🇨🇭", 43: "🇦🇹", 44: "🇬🇧", 45: "🇩🇰", 46: "🇸🇪", 47: "🇳🇴",
+        48: "🇵🇱", 49: "🇩🇪", 51: "🇵🇪", 52: "🇲🇽", 54: "🇦🇷", 55: "🇧🇷",
+        56: "🇨🇱", 57: "🇨🇴", 58: "🇻🇪", 60: "🇲🇾", 61: "🇦🇺", 62: "🇮🇩",
+        63: "🇵🇭", 64: "🇳🇿", 65: "🇸🇬", 66: "🇹🇭", 81: "🇯🇵", 82: "🇰🇷",
+        84: "🇻🇳", 86: "🇨🇳", 90: "🇹🇷", 91: "🇮🇳", 92: "🇵🇰", 93: "🇦🇫",
+        94: "🇱🇰", 95: "🇲🇲", 98: "🇮🇷", 212: "🇲🇦", 213: "🇩🇿", 216: "🇹🇳",
+        218: "🇱🇾", 220: "🇬🇲", 234: "🇳🇬", 254: "🇰🇪", 260: "🇿🇲",
+        263: "🇿🇼", 351: "🇵🇹", 352: "🇱🇺", 353: "🇮🇪", 358: "🇫🇮",
+        370: "🇱🇹", 371: "🇱🇻", 380: "🇺🇦", 420: "🇨🇿", 421: "🇸🇰",
+        852: "🇭🇰", 880: "🇧🇩", 886: "🇹🇼", 966: "🇸🇦", 971: "🇦🇪",
+        972: "🇮🇱", 974: "🇶🇦", 977: "🇳🇵", 992: "🇹🇯", 994: "🇦🇿",
+    }
+
+    OSINT_ENGINES = [
+        ("Google",     "https://www.google.com/search?q=%22{q}%22"),
+        ("DuckDuckGo", "https://duckduckgo.com/?q=%22{q}%22"),
+        ("Bing",       "https://www.bing.com/search?q=%22{q}%22"),
+        ("Yandex",     "https://yandex.com/search/?text=%22{q}%22"),
+        ("Facebook",   "https://www.facebook.com/search/top/?q={q}"),
+        ("LinkedIn",   "https://www.linkedin.com/search/results/all/?keywords={q}"),
+        ("Twitter/X",  "https://twitter.com/search?q=%22{q}%22"),
+        ("Truecaller", "https://www.truecaller.com/search/{cc}/{nat}"),
+        ("Pastebin",   "https://www.google.com/search?q=site%3Apastebin.com+%22{q}%22"),
+        ("GitHub",     "https://github.com/search?q=%22{q}%22&type=code"),
+    ]
 
     @staticmethod
-    def analyze(raw: str) -> dict:
+    def _flag(cc: int) -> str:
+        return PhoneIntel.COUNTRY_FLAGS.get(cc, "🏳️")
+
+    @staticmethod
+    def _osint_links(e164: str, country_code: int, national: str) -> list[dict]:
+        q = e164.replace("+", "")
+        return [
+            {"engine": name,
+             "url": url.format(q=q, cc=country_code, nat=national)}
+            for name, url in PhoneIntel.OSINT_ENGINES
+        ]
+
+    @staticmethod
+    def _format_variants(parsed) -> dict:
+        F = phonenumbers.PhoneNumberFormat
+        fmt = phonenumbers.format_number
+        return {
+            "e164":          fmt(parsed, F.E164),
+            "international": fmt(parsed, F.INTERNATIONAL),
+            "national":      fmt(parsed, F.NATIONAL),
+            "rfc3966":       fmt(parsed, F.RFC3966),
+        }
+
+    @staticmethod
+    def _messenger_links(e164: str) -> dict:
+        """Direct-open URLs for major messengers. Existence isn't confirmed
+        (that requires authenticated APIs) — these are actionable pivots."""
+        num = e164.replace("+", "")
+        return {
+            "whatsapp":  f"https://wa.me/{num}",
+            "telegram":  f"https://t.me/+{num}",
+            "signal":    f"https://signal.me/#p/{e164}",
+            "viber":     f"viber://chat?number={e164}",
+            "skype":     f"skype:{e164}?call",
+            "sms":       f"sms:{e164}",
+            "tel":       f"tel:{e164}",
+        }
+
+    @staticmethod
+    async def _check_messenger_presence(session, e164: str) -> dict:
+        """Best-effort HEAD probes to public messenger endpoints — signals
+        only, never definitive. WhatsApp/Telegram/Viber require auth to
+        confirm registration; response codes are informational."""
+        num = e164.replace("+", "")
+        endpoints = {
+            "whatsapp": f"https://wa.me/{num}",
+            "telegram": f"https://t.me/+{num}",
+        }
+        results = {}
+        for name, url in endpoints.items():
+            try:
+                async with session.head(url, allow_redirects=True, ssl=False,
+                                        timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    results[name] = {"reachable": 200 <= r.status < 400,
+                                     "status": r.status, "url": url}
+            except Exception as e:
+                results[name] = {"reachable": False, "error": str(e), "url": url}
+        return results
+
+    @staticmethod
+    def _reputation_hints(line_type: str, carrier_name: str) -> list[str]:
+        hints = []
+        if line_type == "voip":
+            hints.append("⚠️ VoIP — often used for OTP fraud / burner numbers")
+        if line_type == "toll_free":
+            hints.append("ℹ️ Toll-free — business/support line")
+        if carrier_name and any(k in carrier_name.lower()
+                                for k in ("google", "twilio", "bandwidth", "textnow")):
+            hints.append("⚠️ Virtual carrier — high burner probability")
+        return hints
+
+    @staticmethod
+    async def analyze(raw: str, session: aiohttp.ClientSession = None) -> dict:
         if not PHONE_AVAILABLE:
             return {"error": "phonenumbers library not installed"}
         try:
             parsed = phonenumbers.parse(raw, None)
-            if not phonenumbers.is_valid_number(parsed):
-                return {"error": "Invalid phone number"}
-            ntype = number_type(parsed)
-            type_map = {
-                phonenumbers.PhoneNumberType.MOBILE: "mobile",
-                phonenumbers.PhoneNumberType.FIXED_LINE: "landline",
-                phonenumbers.PhoneNumberType.VOIP: "voip",
-                phonenumbers.PhoneNumberType.TOLL_FREE: "toll_free",
-                phonenumbers.PhoneNumberType.UNKNOWN: "unknown",
-            }
-            return {
-                "e164": phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164),
-                "international": phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL),
-                "country_code": parsed.country_code,
-                "national_number": parsed.national_number,
-                "carrier": carrier.name_for_number(parsed, "en"),
-                "region": geocoder.description_for_number(parsed, "en"),
-                "line_type": type_map.get(ntype, "unknown"),
-                "valid": True,
-            }
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Parse error: {e}"}
+
+        valid = phonenumbers.is_valid_number(parsed)
+        possible = phonenumbers.is_possible_number(parsed)
+
+        ntype = number_type(parsed)
+        type_map = {
+            phonenumbers.PhoneNumberType.MOBILE: "mobile",
+            phonenumbers.PhoneNumberType.FIXED_LINE: "landline",
+            phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE: "fixed_or_mobile",
+            phonenumbers.PhoneNumberType.VOIP: "voip",
+            phonenumbers.PhoneNumberType.TOLL_FREE: "toll_free",
+            phonenumbers.PhoneNumberType.PREMIUM_RATE: "premium_rate",
+            phonenumbers.PhoneNumberType.SHARED_COST: "shared_cost",
+            phonenumbers.PhoneNumberType.PERSONAL_NUMBER: "personal",
+            phonenumbers.PhoneNumberType.PAGER: "pager",
+            phonenumbers.PhoneNumberType.UAN: "uan",
+            phonenumbers.PhoneNumberType.UNKNOWN: "unknown",
+        }
+        line_type = type_map.get(ntype, "unknown")
+        car = carrier.name_for_number(parsed, "en") or "Unknown"
+        region_iso = phonenumbers.region_code_for_number(parsed) or "??"
+        region_name = geocoder.description_for_number(parsed, "en") or "Unknown"
+
+        try:
+            from phonenumbers import timezone as pn_tz
+            timezones = list(pn_tz.time_zones_for_number(parsed))
+        except Exception:
+            timezones = []
+
+        fmts = PhoneIntel._format_variants(parsed)
+        national_str = str(parsed.national_number)
+
+        result = {
+            "valid": valid,
+            "possible": possible,
+            "flag": PhoneIntel._flag(parsed.country_code),
+            "formats": fmts,
+            "country_code": parsed.country_code,
+            "region_iso": region_iso,
+            "region_name": region_name,
+            "national_number": national_str,
+            "carrier": car,
+            "line_type": line_type,
+            "timezones": timezones,
+            "messengers": PhoneIntel._messenger_links(fmts["e164"]),
+            "reputation_hints": PhoneIntel._reputation_hints(line_type, car),
+            "osint_dorks": PhoneIntel._osint_links(
+                fmts["e164"], parsed.country_code, national_str
+            ),
+        }
+
+        if session is not None:
+            result["messenger_presence"] = \
+                await PhoneIntel._check_messenger_presence(session, fmts["e164"])
+
+        return result
 
 # ─── Module 3: Domain & URL Forensics ────────────────────────────────────────
 
@@ -669,9 +808,9 @@ class GhostBusterEngine:
             log.warning("HIBP requires API key — skipping breach check")
         return {"email": email, "hibp": hibp}
 
-    async def investigate_phone(self, phone: str) -> dict:
+    async def investigate_phone(self, session, phone: str) -> dict:
         log.info(f"[PHONE] Analyzing {phone}")
-        return PhoneIntel.analyze(phone)
+        return await PhoneIntel.analyze(phone, session)
 
     async def run(self, targets: list[dict]) -> dict:
         connector = aiohttp.TCPConnector(limit=50, ssl=False)
@@ -705,7 +844,7 @@ class GhostBusterEngine:
                 elif ttype == "email":
                     tasks.append(self.investigate_email(session, value))
                 elif ttype == "phone":
-                    tasks.append(self.investigate_phone(value))
+                    tasks.append(self.investigate_phone(session, value))
                 elif ttype == "image":
                     tasks.append(asyncio.coroutine(lambda v=value: {"exif": ImageIntel.extract_exif(v)})())
                 else:
@@ -876,10 +1015,41 @@ async def main_async(args):
                     print(f"    [{r['platform']}] {r['url']}")
 
             elif t["type"] == "phone":
-                print(f"  E.164    : {data.get('e164')}")
-                print(f"  Carrier  : {data.get('carrier')}")
-                print(f"  Region   : {data.get('region')}")
-                print(f"  Type     : {data.get('line_type')}")
+                fmts = data.get("formats", {})
+                flag = data.get("flag", "")
+                print(f"  {flag}  Country  : +{data.get('country_code')} "
+                      f"({data.get('region_iso')}) — {data.get('region_name')}")
+                print(f"  📞 E.164     : {fmts.get('e164')}")
+                print(f"  🌐 Intl      : {fmts.get('international')}")
+                print(f"  🏠 National  : {fmts.get('national')}")
+                print(f"  📡 Carrier   : {data.get('carrier')}")
+                print(f"  📟 Line Type : {data.get('line_type')}")
+                tz = data.get("timezones", [])
+                if tz:
+                    print(f"  🕐 Timezone  : {', '.join(tz)}")
+                print(f"  ✅ Valid     : {data.get('valid')} "
+                      f"(possible: {data.get('possible')})")
+                for hint in data.get("reputation_hints", []):
+                    print(f"  {hint}")
+                mp = data.get("messenger_presence", {})
+                if mp:
+                    print(f"  💬 Messenger reachability (best-effort HEAD):")
+                    for name, r in mp.items():
+                        mark = "✓" if r.get("reachable") else "✗"
+                        print(f"     [{mark}] {name:9s} → {r.get('url')}")
+                msg = data.get("messengers", {})
+                if msg:
+                    print(f"  🔗 Direct-open pivots:")
+                    for name in ("whatsapp", "telegram", "signal", "viber"):
+                        if name in msg:
+                            print(f"     {name:9s} : {msg[name]}")
+                dorks = data.get("osint_dorks", [])
+                if dorks:
+                    print(f"  🔎 OSINT search links ({len(dorks)}):")
+                    for d in dorks[:6]:
+                        print(f"     [{d['engine']:12s}] {d['url']}")
+                    if len(dorks) > 6:
+                        print(f"     … +{len(dorks)-6} more in JSON report")
 
             elif t["type"] == "email":
                 hibp = data.get("hibp", {})
