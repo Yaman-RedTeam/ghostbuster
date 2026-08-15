@@ -1800,7 +1800,8 @@ def _render_phone_panels(target: str, data: dict):
                      f"{D}({data.get('region_iso','??')} · +{data.get('country_code','?')}){R}"),
         ("Type",     f"{Y}{data.get('line_type','?')}{R}"),
         ("Validity", valid_str),
-        ("Carrier",  f"{W}{data.get('carrier') or 'unknown'}{R}"),
+        ("Carrier",  f"{W}{data.get('carrier') or 'unknown'}{R} "
+                     f"{D}(original allocation, pre-MNP){R}"),
     ]
     tz = data.get("timezones", [])
     if tz:
@@ -1879,32 +1880,33 @@ def _render_phone_panels(target: str, data: dict):
             filled = round(pct / 10)
             return "█" * filled + "░" * (10 - filled)
 
+        # Only fields that are actually reliable via free/offline sources:
+        # validity + line_type are algorithmic/stable. Carrier is NOT — it
+        # changes with MNP and free sources hold stale data — so we show it
+        # honestly labelled, never as "current carrier".
         rows_c = []
-        cc = con.get("carrier", {})
-        if cc.get("value"):
-            pct = cc.get("confidence", 0)
-            col = conf_color(pct)
-            disp = f"{RED} ⚠ disputed{R}" if cc.get("disputed") else ""
-            rows_c.append(("Carrier",
-                f"{col}{cc['value']}{R}  {col}{bar(pct)} {pct}%{R}  "
-                f"{D}({cc.get('votes')}/{cc.get('total')} votes){R}{disp}"))
-            # Show the disagreement breakdown if disputed
-            if cc.get("disputed"):
-                for name, n in cc.get("all", {}).items():
-                    srcs = ", ".join(cc.get("sources", [])) if name == cc["value"] else ""
-                    rows_c.append(("  ↳", f"{D}{name}: {n} vote(s){R}"))
-        ct = con.get("line_type", {})
-        if ct.get("value"):
-            pct = ct.get("confidence", 0)
-            rows_c.append(("Line Type",
-                f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
         cv = con.get("valid", {})
         if cv.get("value") is not None:
             pct = cv.get("confidence", 0)
             vs = f"{G}VALID{R}" if cv["value"] else f"{RED}INVALID{R}"
             rows_c.append(("Validity", f"{vs}  {D}{bar(pct)} {pct}%{R}"))
+        ct = con.get("line_type", {})
+        if ct.get("value"):
+            pct = ct.get("confidence", 0)
+            rows_c.append(("Line Type",
+                f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
+        cc = con.get("carrier", {})
+        if cc.get("value"):
+            # Present as historical/registered, NOT current
+            rows_c.append(("Carrier (registered)",
+                f"{Y}{cc['value']}{R}  {RED}⚠ may be stale — MNP not reflected{R}"))
+            if cc.get("disputed"):
+                srcs = ", ".join(f"{k}" for k in cc.get("all", {}).keys())
+                rows_c.append(("  ↳ sources disagree", f"{D}{srcs}{R}"))
+            rows_c.append(("Carrier (live/current)",
+                f"{D}unknown — needs live HLR (not available in free sources){R}"))
         if rows_c:
-            print(_panel("⚡ CONSENSUS  (multi-provider vote)", rows_c, width=90,
+            print(_panel("⚡ VERIFIED FACTS  (what we can trust)", rows_c, width=94,
                          border_color="\033[38;5;201m",   # magenta
                          title_color="\033[38;5;201m"))
 
