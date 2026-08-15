@@ -942,6 +942,122 @@ def build_parser() -> argparse.ArgumentParser:
 
     return p
 
+# ─── Rich boxed panel renderer (Numint-style) ───────────────────────────────
+
+def _visible_len(s: str) -> int:
+    """Length of string with ANSI codes stripped."""
+    return len(re.sub(r"\x1b\[[0-9;]*m", "", s))
+
+def _panel(title: str, rows: list[tuple], width: int = 70,
+           border_color: str = "\033[38;5;46m",
+           title_color: str = "\033[38;5;46m",
+           label_color: str = "\033[38;5;255m",
+           value_color: str = "\033[38;5;51m") -> str:
+    """Draw a boxed panel with a centered title and right-aligned labels.
+    rows: list of (label, value) — value may already contain color codes."""
+    R = "\033[0m"
+    BOLD = "\033[1m"
+    # Title bar: ╭─── Title ───╮
+    title_txt = f" {BOLD}{title_color}{title}{R} "
+    tvis = _visible_len(title_txt)
+    side = max(0, (width - 2 - tvis) // 2)
+    left_dashes = "─" * side
+    right_dashes = "─" * (width - 2 - side - tvis)
+    top = f"{border_color}╭{left_dashes}{R}{title_txt}{border_color}{right_dashes}╮{R}"
+    bot = f"{border_color}╰{'─' * (width - 2)}╯{R}"
+
+    # Widest label for right-alignment
+    max_label = max((_visible_len(l) for l, _ in rows), default=0)
+
+    lines = [top]
+    for label, value in rows:
+        pad_label = " " * (max_label - _visible_len(label))
+        line_content = f"  {pad_label}{label_color}{label}{R}  {value}{R}"
+        inner_len = _visible_len(line_content)
+        trailing = " " * max(0, width - 2 - inner_len)
+        lines.append(f"{border_color}│{R}{line_content}{trailing}{border_color}│{R}")
+    lines.append(bot)
+    return "\n".join(lines)
+
+
+def _render_phone_panels(target: str, data: dict):
+    G = "\033[38;5;46m"    # green
+    O = "\033[38;5;208m"   # orange
+    C = "\033[38;5;51m"    # cyan
+    Y = "\033[38;5;226m"   # yellow
+    RED = "\033[38;5;196m"
+    W = "\033[38;5;255m"
+    D = "\033[38;5;240m"
+    R = "\033[0m"
+
+    if data.get("error"):
+        print(f"\n{RED}  ✗ {data['error']}{R}\n")
+        return
+
+    fmts   = data.get("formats", {})
+    flag   = data.get("flag", "🏳️")
+    valid  = data.get("valid")
+    poss   = data.get("possible")
+    valid_str = f"{G}VALID{R}" if valid else f"{RED}INVALID{R}"
+
+    # ── Panel 1: Intelligence Profile ──
+    rows1 = [
+        ("Number",   f"{C}{fmts.get('e164', target)}{R}"),
+        ("National", f"{W}{fmts.get('national', '?')}{R}"),
+        ("Country",  f"{flag}  {W}{data.get('region_name','?')} "
+                     f"{D}({data.get('region_iso','??')} · +{data.get('country_code','?')}){R}"),
+        ("Type",     f"{Y}{data.get('line_type','?')}{R}"),
+        ("Validity", valid_str),
+        ("Carrier",  f"{W}{data.get('carrier') or 'unknown'}{R}"),
+    ]
+    tz = data.get("timezones", [])
+    if tz:
+        rows1.append(("Timezone", f"{W}{', '.join(tz)}{R}"))
+    for hint in data.get("reputation_hints", []):
+        rows1.append(("Note", f"{Y}{hint}{R}"))
+
+    print()
+    print(_panel("Intelligence Profile", rows1, width=72,
+                 border_color=G, title_color=G))
+
+    # ── Panel 2: Validity & Format ──
+    rows2 = [
+        ("E.164",         f"{C}{fmts.get('e164','?')}{R}"),
+        ("International", f"{W}{fmts.get('international','?')}{R}"),
+        ("National",      f"{W}{fmts.get('national','?')}{R}"),
+        ("RFC3966",       f"{D}{fmts.get('rfc3966','?')}{R}"),
+        ("Possible",      f"{G}yes{R}" if poss  else f"{RED}no{R}"),
+        ("Valid",         f"{G}yes{R}" if valid else f"{RED}no{R}"),
+    ]
+    print(_panel("Validity & Format", rows2, width=72,
+                 border_color=O, title_color=O))
+
+    # ── Panel 3: Messenger Presence ──
+    mp = data.get("messenger_presence", {})
+    msg = data.get("messengers", {})
+    if mp or msg:
+        rows3 = []
+        for name in ("whatsapp", "telegram"):
+            if name in mp:
+                r = mp[name]
+                ok = r.get("reachable")
+                mark = f"{G}✓ reachable{R}" if ok else f"{RED}✗ unreachable{R}"
+                rows3.append((name.capitalize(), f"{mark}  {D}({r.get('status','?')}){R}"))
+        for name in ("signal", "viber", "skype", "sms", "tel"):
+            if name in msg:
+                rows3.append((name.capitalize(), f"{D}{msg[name]}{R}"))
+        print(_panel("Messenger Presence & Pivots", rows3, width=72,
+                     border_color=C, title_color=C))
+
+    # ── Panel 4: OSINT Search Links ──
+    dorks = data.get("osint_dorks", [])
+    if dorks:
+        rows4 = [(d["engine"], f"{D}{d['url']}{R}") for d in dorks]
+        print(_panel(f"OSINT Search Dorks ({len(dorks)})", rows4, width=90,
+                     border_color=Y, title_color=Y))
+    print()
+
+
 async def main_async(args):
     config = load_config(args.config)
     config["graph"] = args.graph
@@ -1015,41 +1131,7 @@ async def main_async(args):
                     print(f"    [{r['platform']}] {r['url']}")
 
             elif t["type"] == "phone":
-                fmts = data.get("formats", {})
-                flag = data.get("flag", "")
-                print(f"  {flag}  Country  : +{data.get('country_code')} "
-                      f"({data.get('region_iso')}) — {data.get('region_name')}")
-                print(f"  📞 E.164     : {fmts.get('e164')}")
-                print(f"  🌐 Intl      : {fmts.get('international')}")
-                print(f"  🏠 National  : {fmts.get('national')}")
-                print(f"  📡 Carrier   : {data.get('carrier')}")
-                print(f"  📟 Line Type : {data.get('line_type')}")
-                tz = data.get("timezones", [])
-                if tz:
-                    print(f"  🕐 Timezone  : {', '.join(tz)}")
-                print(f"  ✅ Valid     : {data.get('valid')} "
-                      f"(possible: {data.get('possible')})")
-                for hint in data.get("reputation_hints", []):
-                    print(f"  {hint}")
-                mp = data.get("messenger_presence", {})
-                if mp:
-                    print(f"  💬 Messenger reachability (best-effort HEAD):")
-                    for name, r in mp.items():
-                        mark = "✓" if r.get("reachable") else "✗"
-                        print(f"     [{mark}] {name:9s} → {r.get('url')}")
-                msg = data.get("messengers", {})
-                if msg:
-                    print(f"  🔗 Direct-open pivots:")
-                    for name in ("whatsapp", "telegram", "signal", "viber"):
-                        if name in msg:
-                            print(f"     {name:9s} : {msg[name]}")
-                dorks = data.get("osint_dorks", [])
-                if dorks:
-                    print(f"  🔎 OSINT search links ({len(dorks)}):")
-                    for d in dorks[:6]:
-                        print(f"     [{d['engine']:12s}] {d['url']}")
-                    if len(dorks) > 6:
-                        print(f"     … +{len(dorks)-6} more in JSON report")
+                _render_phone_panels(t["value"], data)
 
             elif t["type"] == "email":
                 hibp = data.get("hibp", {})
