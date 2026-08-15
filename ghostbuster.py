@@ -1106,6 +1106,20 @@ class PhoneIntel:
                 return label
         return name.strip()
 
+    # Operators that no longer exist — a number reporting these is
+    # GUARANTEED to have been ported; its current carrier is unknowable
+    # from stale provider DBs.
+    DEFUNCT_CARRIERS = ("aircel", "telewings", "uninor", "telenor",
+                        "mts", "sistema", "videocon", "loop", "reliance communications",
+                        "rcom", "tata docomo", "tata teleservices")
+
+    @staticmethod
+    def _is_defunct(carrier_label: str) -> bool:
+        if not carrier_label:
+            return False
+        c = carrier_label.lower()
+        return any(k in c for k in PhoneIntel.DEFUNCT_CARRIERS)
+
     @staticmethod
     def _extract_fields(provider_name: str, data: Any) -> dict:
         """Pull (carrier, line_type, valid) from any provider's raw payload."""
@@ -1179,6 +1193,9 @@ class PhoneIntel:
 
         # Did the live API disagree with the original allocation? (= ported)
         ported = bool(car_val and original_alloc and car_val != original_alloc)
+        # A defunct operator can't be the CURRENT carrier → definitely ported,
+        # current unknown despite the provider's confident-looking answer.
+        defunct = PhoneIntel._is_defunct(car_val)
 
         return {
             "carrier": {
@@ -1188,6 +1205,7 @@ class PhoneIntel:
                 "has_live": car_val is not None,
                 "original_alloc": original_alloc,
                 "ported": ported,
+                "defunct": defunct,
                 "all": dict(live_carrier),
                 "disputed": len(live_carrier) > 1,
             },
@@ -1942,7 +1960,15 @@ def _render_phone_panels(target: str, data: dict):
             rows_c.append(("Line Type",
                 f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
         cc = con.get("carrier", {})
-        if cc.get("has_live"):
+        if cc.get("has_live") and cc.get("defunct"):
+            # Provider returned a shut-down operator → number was ported;
+            # current carrier is genuinely unknown.
+            srcs = ", ".join(cc.get("sources", []))
+            rows_c.append(("Carrier (current)",
+                f"{RED}unknown — definitely ported{R}"))
+            rows_c.append(("  ↳ why",
+                f"{D}{srcs} says '{cc['value']}' — that operator is shut down{R}"))
+        elif cc.get("has_live"):
             # Live API providers track ported numbers — treat as best current guess
             pct = cc.get("confidence", 0)
             srcs = ", ".join(cc.get("sources", []))
