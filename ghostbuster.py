@@ -59,6 +59,12 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
+try:
+    from pyfiglet import Figlet
+    PYFIGLET_AVAILABLE = True
+except ImportError:
+    PYFIGLET_AVAILABLE = False
+
 # ─── Logging Setup ──────────────────────────────────────────────────────────
 
 def setup_logging(log_file: str = "ghostbuster.log", level: str = "INFO"):
@@ -2487,37 +2493,34 @@ def print_banner():
         pass
 
 def _print_rich_banner():
-    """Gradient ASCII banner rendered with rich (width-aware)."""
-    art = [
-        "   ▄████  ██░ ██  ▒█████    ██████ ▄▄▄█████▓ ▄▄▄▄    █    ██   ██████ ▄▄▄█████▓▓█████  ██▀███  ",
-        "  ██▒ ▀█▒▓██░ ██▒▒██▒  ██▒▒██    ▒ ▓  ██▒ ▓▒▓█████▄  ██  ▓██▒▒██    ▒ ▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒",
-        " ▒██░▄▄▄░▒██▀▀██░▒██░  ██▒░ ▓██▄   ▒ ▓██░ ▒░▒██▒ ▄██▓██  ▒██░░ ▓██▄   ▒ ▓██░ ▒░▒███   ▓██ ░▄█ ▒",
-        " ░▓█  ██▓░▓█ ░██ ▒██   ██░  ▒   ██▒░ ▓██▓ ░ ▒██░█▀  ▓▓█  ░██░  ▒   ██▒░ ▓██▓ ░ ▒▓█  ▄ ▒██▀▀█▄  ",
-        " ░▒▓███▀▒░▓█▒░██▓░ ████▓▒░▒██████▒▒  ▒██▒ ░ ░▓█  ▀█▓▒▒█████▓ ▒██████▒▒  ▒██▒ ░ ░▒████▒░██▓ ▒██▒",
-        "  ░▒   ▒  ▒ ░░▒░▒░ ▒░▒░▒░ ▒ ▒▓▒ ▒ ░  ▒ ░░   ░▒▓███▀▒░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░  ▒ ░░   ░░ ▒░ ░░ ▒▓ ░▒▓░",
-        "   ░   ░  ▒ ░▒░ ░  ░ ▒ ▒░ ░ ░▒  ░ ░    ░    ▒░▒   ░ ░░▒░ ░ ░ ░ ░▒  ░ ░    ░     ░ ░  ░  ░▒ ░ ▒░",
-        " ░ ░   ░  ░  ░░ ░░ ░ ░ ▒  ░  ░  ░    ░       ░    ░  ░░░ ░ ░ ░  ░  ░    ░         ░     ░░   ░ ",
-        "       ░  ░  ░  ░    ░ ░        ░            ░         ░           ░              ░  ░   ░     ",
-    ]
+    """Clean figlet banner with a green→cyan gradient (width-aware)."""
     # green → cyan gradient down the rows
     grad = ["#00ff5f", "#00ff87", "#00ffaf", "#00ffd7", "#00ffff",
             "#00d7ff", "#00afff", "#00afd7", "#0087af"]
     console = Console()
     console.print()
 
-    # If terminal is too narrow for the 96-wide art, use a compact wordmark.
-    if console.width < 98:
+    art = None
+    if PYFIGLET_AVAILABLE:
+        try:
+            art = Figlet(font="standard", width=200) \
+                .renderText("GHOSTBUSTER").rstrip("\n").split("\n")
+        except Exception:
+            art = None
+
+    # Render the figlet art if it fits; else a compact wordmark.
+    if art and console.width >= (max(len(l) for l in art) + 2):
+        banner = Text()
+        for i, line in enumerate(art):
+            banner.append(line + "\n", style=f"bold {grad[i % len(grad)]}")
+        banner.no_wrap = True
+        console.print(Align.center(banner))
+    else:
         compact = Text()
         compact.append("👻 ", style="bold #00ff5f")
         for i, ch in enumerate("GHOSTBUSTER"):
             compact.append(ch, style=f"bold {grad[i % len(grad)]}")
         console.print(Align.center(compact))
-    else:
-        banner = Text()
-        for i, line in enumerate(art):
-            banner.append(line + "\n", style=f"bold {grad[i % len(grad)]}", )
-        banner.no_wrap = True
-        console.print(Align.center(banner))
 
     sub = Text()
     sub.append("👻 GhostBuster", style="bold #00ff5f")
