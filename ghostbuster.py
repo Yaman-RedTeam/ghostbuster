@@ -59,11 +59,6 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
-try:
-    from pyfiglet import Figlet
-    PYFIGLET_AVAILABLE = True
-except ImportError:
-    PYFIGLET_AVAILABLE = False
 
 # ─── Logging Setup ──────────────────────────────────────────────────────────
 
@@ -2471,58 +2466,11 @@ BANNER = f"""
 """
 
 def print_banner():
-    if RICH_AVAILABLE:
-        try:
-            _print_rich_banner()
-            return
-        except Exception:
-            pass
+    # Original solid blocky wordmark (green GHOST + orange BUSTER).
     try:
         print(BANNER)
     except UnicodeEncodeError:
         pass
-
-def _print_rich_banner():
-    """Clean figlet banner with a green→cyan gradient (width-aware)."""
-    # green → cyan gradient down the rows
-    grad = ["#00ff5f", "#00ff87", "#00ffaf", "#00ffd7", "#00ffff",
-            "#00d7ff", "#00afff", "#00afd7", "#0087af"]
-    console = Console()
-    console.print()
-
-    art = None
-    if PYFIGLET_AVAILABLE:
-        try:
-            art = Figlet(font="standard", width=200) \
-                .renderText("GHOSTBUSTER").rstrip("\n").split("\n")
-        except Exception:
-            art = None
-
-    # Render the figlet art if it fits; else a compact wordmark.
-    if art and console.width >= (max(len(l) for l in art) + 2):
-        banner = Text()
-        for i, line in enumerate(art):
-            banner.append(line + "\n", style=f"bold {grad[i % len(grad)]}")
-        banner.no_wrap = True
-        console.print(Align.center(banner))
-    else:
-        compact = Text()
-        compact.append("👻 ", style="bold #00ff5f")
-        for i, ch in enumerate("GHOSTBUSTER"):
-            compact.append(ch, style=f"bold {grad[i % len(grad)]}")
-        console.print(Align.center(compact))
-
-    sub = Text()
-    sub.append("👻 GhostBuster", style="bold #00ff5f")
-    sub.append("  ·  ", style="grey37")
-    sub.append("OSINT Reconnaissance Framework", style="bright_white")
-    sub.append("  ·  ", style="grey37")
-    sub.append("v1.1.0", style="bold #00ffd7")
-    console.print(Align.center(
-        Panel(sub, box=rich_box.HEAVY, border_style="#00ff87", expand=False,
-              padding=(0, 3),
-              subtitle="[grey58]Yaman.RedTeam · Authorized Testing Only[/grey58]")
-    ))
 
 MENU_OPTIONS = [
     ("1", "📱", "Phone Number",   "phone",    "Carrier, location, MNP status, messenger presence"),
