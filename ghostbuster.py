@@ -2466,22 +2466,87 @@ BANNER = f"""
 """
 
 def print_banner():
-    # Original solid blocky wordmark (green GHOST + orange BUSTER).
+    # Rich path: centered two-tone wordmark + aligned info box.
+    if RICH_AVAILABLE:
+        try:
+            _print_rich_header()
+            return
+        except Exception:
+            pass
     try:
         print(BANNER)
     except UnicodeEncodeError:
         pass
 
+# Shared brand palette (matches the wordmark: GHOST=green, BUSTER=orange)
+_GREEN, _ORANGE, _INK, _MUTED = "#00ff00", "#ff8700", "#e8e8e8", "grey58"
+
+def _print_rich_header():
+    """Centered wordmark + a clean, aligned information box."""
+    console = Console()
+    console.print()
+
+    # ── Wordmark (centered as one rectangular block on the terminal axis) ──
+    if console.width >= _LOGO_W + 2:
+        logo = Text(no_wrap=True)
+        for n, (g, o) in enumerate(_LOGO):
+            logo.append(g, style=f"bold {_GREEN}")
+            tail = o.ljust(_LOGO_W - len(g))
+            logo.append(tail + ("\n" if n < len(_LOGO) - 1 else ""), style=f"bold {_ORANGE}")
+        console.print(Align.center(logo))
+    else:  # compact fallback on narrow terminals
+        wm = Text()
+        wm.append("👻 GHOST", style=f"bold {_GREEN}")
+        wm.append("BUSTER", style=f"bold {_ORANGE}")
+        console.print(Align.center(wm))
+
+    console.print()
+
+    # ── Information box (fixed width, every line centered inside) ──
+    W = _box_width(console)
+    info = Text(justify="center")
+    info.append("👻 GhostBuster", style=f"bold {_GREEN}")
+    info.append("   ·   ", style=_MUTED)
+    info.append("OSINT Reconnaissance Framework", style=_INK)
+    info.append("   ·   ", style=_MUTED)
+    info.append("v1.1.0\n", style=f"bold {_ORANGE}")
+    info.append("Developed by ", style=_INK)
+    info.append("Yaman.RedTeam", style=f"bold {_ORANGE}")
+    info.append("   ·   ", style=_MUTED)
+    info.append("Authorized Testing Only\n", style=f"bold {_GREEN}")
+    info.append("github.com/Yaman-RedTeam/ghostbuster", style=_MUTED)
+    console.print(Align.center(
+        Panel(info, box=rich_box.ROUNDED, border_style=_GREEN, width=W, padding=(0, 2))
+    ))
+
 MENU_OPTIONS = [
-    ("1", "📱", "Phone Number",   "phone",    "Carrier, location, MNP status, messenger presence"),
-    ("2", "🌍", "IP Address",     "ip",       "GeoIP, ASN, reverse DNS, Shodan infrastructure"),
-    ("3", "🔗", "Domain",         "domain",   "WHOIS, DNS, subdomains, SSL certificates"),
-    ("4", "📧", "Email Address",  "email",    "Email parsing, breach checking (HIBP)"),
-    ("5", "🔍", "Username",       "username", "Find social profiles across 24+ platforms"),
-    ("6", "🌐", "Website URL",    "url",      "URL expansion, redirect chains, domain intel"),
-    ("7", "🖼️",  "Image File",     "image",    "EXIF metadata, GPS geolocation, camera info"),
-    ("8", "📊", "Bulk Scan",      "bulk",     "Scan multiple targets from CSV / JSON / TXT"),
+    ("1", "📱", "Phone Number",   "phone",    "Carrier · location · MNP · messengers"),
+    ("2", "🌍", "IP Address",     "ip",       "GeoIP · ASN · reverse DNS · Shodan"),
+    ("3", "🔗", "Domain",         "domain",   "WHOIS · DNS · subdomains · SSL"),
+    ("4", "📧", "Email Address",  "email",    "Parsing · breach check (HIBP)"),
+    ("5", "🔍", "Username",       "username", "Social profiles · 24+ platforms"),
+    ("6", "🌐", "Website URL",    "url",      "Redirect chain · domain intel"),
+    ("7", "🖼️",  "Image File",     "image",    "EXIF · GPS · camera info"),
+    ("8", "📊", "Bulk Scan",      "bulk",     "Many targets · CSV / JSON / TXT"),
 ]
+
+# ── Two-tone wordmark: (green_half, orange_half) per row, padded to a rectangle ──
+_LOGO = [
+    ("   ▄████  ██░ ██  ▒█████    ██████ ▄▄▄█████▓", " ▄▄▄▄    █    ██   ██████ ▄▄▄█████▓▓█████  ██▀███  "),
+    ("  ██▒ ▀█▒▓██░ ██▒▒██▒  ██▒▒██    ▒ ▓  ██▒ ▓▒", "▓█████▄  ██  ▓██▒▒██    ▒ ▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒"),
+    (" ▒██░▄▄▄░▒██▀▀██░▒██░  ██▒░ ▓██▄   ▒ ▓██░ ▒░", "▒██▒ ▄██▓██  ▒██░░ ▓██▄   ▒ ▓██░ ▒░▒███   ▓██ ░▄█ ▒"),
+    (" ░▓█  ██▓░▓█ ░██ ▒██   ██░  ▒   ██▒░ ▓██▓ ░ ", "▒██░█▀  ▓▓█  ░██░  ▒   ██▒░ ▓██▓ ░ ▒▓█  ▄ ▒██▀▀█▄  "),
+    (" ░▒▓███▀▒░▓█▒░██▓░ ████▓▒░▒██████▒▒  ▒██▒ ░ ", "░▓█  ▀█▓▒▒█████▓ ▒██████▒▒  ▒██▒ ░ ░▒████▒░██▓ ▒██▒"),
+    ("  ░▒   ▒  ▒ ░░▒░▒░ ▒░▒░▒░ ▒ ▒▓▒ ▒ ░  ▒ ░░   ", "░▒▓███▀▒░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░  ▒ ░░   ░░ ▒░ ░░ ▒▓ ░▒▓░"),
+    ("   ░   ░  ▒ ░▒░ ░  ░ ▒ ▒░ ░ ░▒  ░ ░    ░    ", "▒░▒   ░ ░░▒░ ░ ░ ░ ░▒  ░ ░    ░     ░ ░  ░  ░▒ ░ ▒░"),
+    (" ░ ░   ░  ░  ░░ ░░ ░ ░ ▒  ░  ░  ░    ░      ", " ░    ░  ░░░ ░ ░ ░  ░  ░    ░         ░     ░░   ░ "),
+    ("       ░  ░  ░  ░    ░ ░        ░           ", " ░         ░           ░              ░  ░   ░     "),
+]
+_LOGO_W = max(len(g) + len(o) for g, o in _LOGO)   # rectangle width for clean centering
+
+def _box_width(console) -> int:
+    """Shared, terminal-aware width so every boxed section lines up."""
+    return max(52, min(console.width - 2, 74))
 
 def _make_args(target=None, ttype=None, bulk=None):
     return type('Args', (), {
@@ -2491,42 +2556,37 @@ def _make_args(target=None, ttype=None, bulk=None):
     })()
 
 def _rich_menu():
-    """Premium rich-powered interactive menu."""
+    """Rich interactive menu — centered, consistent-width, two-tone."""
     console = Console()
+    W = _box_width(console)
 
-    # ── Header band ──
+    # ── Command Center band (same width/style as the info box) ──
     console.print()
-    header = Text()
-    header.append("  👻  ", style="bold bright_green")
-    header.append("G H O S T B U S T E R", style="bold bright_green")
-    header.append("   OSINT Command Center", style="bright_white")
+    cc = Text(justify="center")
+    cc.append("⚡ ", style=_ORANGE)
+    cc.append("GHOSTBUSTER", style=f"bold {_GREEN}")
+    cc.append("  OSINT COMMAND CENTER", style=f"bold {_ORANGE}")
     console.print(Align.center(
-        Panel(Align.center(header), box=rich_box.DOUBLE,
-              border_style="bright_green", padding=(0, 2),
-              subtitle="[dim]v1.1.0 · Yaman.RedTeam · Authorized Testing Only[/dim]")
+        Panel(cc, box=rich_box.ROUNDED, border_style=_ORANGE, width=W, padding=(0, 2))
     ))
     console.print()
 
-    # ── Options table (2-column card grid) ──
-    palette = ["bright_green", "bright_cyan", "bright_magenta", "yellow",
-               "bright_blue", "bright_red", "magenta", "green"]
+    # ── Options table (fixed width → columns line up, one row each) ──
+    table = Table(show_header=True, box=rich_box.ROUNDED, border_style=_GREEN,
+                  header_style=f"bold {_INK}", width=W, padding=(0, 1),
+                  title=f"[bold {_ORANGE}]Choose Your Reconnaissance Vector[/bold {_ORANGE}]",
+                  title_justify="center", row_styles=["", "on grey11"], pad_edge=True)
+    table.add_column("#",  justify="center", width=3, no_wrap=True)
+    table.add_column("Target", justify="left", width=18, no_wrap=True)
+    table.add_column("Intelligence Gathered", justify="left", no_wrap=True, overflow="ellipsis")
 
-    table = Table(show_header=True, box=rich_box.ROUNDED, border_style="grey37",
-                  header_style="bold bright_white on grey19", expand=True,
-                  padding=(0, 1), title="[bold bright_cyan]⚡ Choose Your Reconnaissance Vector[/bold bright_cyan]",
-                  title_justify="center")
-    table.add_column("#", justify="center", style="bold", width=4)
-    table.add_column("Target", justify="left", width=22)
-    table.add_column("Intelligence Gathered", justify="left", style="dim", overflow="fold")
-
-    for i, (key, icon, label, _, desc) in enumerate(MENU_OPTIONS):
-        color = palette[i % len(palette)]
+    for key, icon, label, _t, desc in MENU_OPTIONS:
         table.add_row(
-            f"[{color}]{key}[/{color}]",
-            f"{icon}  [{color}]{label}[/{color}]",
-            desc
+            f"[bold {_ORANGE}]{key}[/bold {_ORANGE}]",
+            f"{icon}  [{_GREEN}]{label}[/{_GREEN}]",
+            f"[{_MUTED}]{desc}[/{_MUTED}]",
         )
-    console.print(table)
+    console.print(Align.center(table))
     console.print()
 
     # ── Selection loop ──
@@ -2534,33 +2594,33 @@ def _rich_menu():
     while True:
         try:
             choice = Prompt.ask(
-                "[bold bright_green]►[/bold bright_green] [bright_white]Select vector[/bright_white]",
+                f"[bold {_GREEN}]►[/bold {_GREEN}] [{_INK}]Select vector[/{_INK}] [{_MUTED}](1-8, q to quit)[/{_MUTED}]",
                 choices=valid + ["q"], show_choices=False, default="1"
             ).strip().lower()
 
             if choice == 'q':
-                console.print("[yellow]  ✦ Exiting GhostBuster. Stay ethical! 👻[/yellow]")
+                console.print(f"[{_ORANGE}]  ✦ Exiting GhostBuster. Stay ethical! 👻[/{_ORANGE}]")
                 sys.exit(0)
 
             key, icon, label, ttype, desc = MENU_OPTIONS[int(choice) - 1]
-            console.print(f"\n[bold {palette[int(choice)-1]}]  {icon} {label}[/bold {palette[int(choice)-1]}] [dim]selected[/dim]")
+            console.print(f"\n[bold {_GREEN}]  {icon} {label}[/bold {_GREEN}] [{_MUTED}]selected[/{_MUTED}]")
 
             if ttype == "bulk":
-                target = Prompt.ask("[bright_cyan]  📁 File path (CSV/JSON/TXT)[/bright_cyan]").strip()
+                target = Prompt.ask(f"[{_ORANGE}]  📁 File path (CSV/JSON/TXT)[/{_ORANGE}]").strip()
                 if not target:
-                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    console.print(f"[{_ORANGE}]  ✦ Cancelled[/{_ORANGE}]\n")
                     continue
                 return _make_args(bulk=target, ttype="bulk")
             else:
-                target = Prompt.ask(f"[bright_cyan]  🎯 Enter {label}[/bright_cyan]").strip()
+                target = Prompt.ask(f"[{_ORANGE}]  🎯 Enter {label}[/{_ORANGE}]").strip()
                 if not target:
-                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    console.print(f"[{_ORANGE}]  ✦ Cancelled[/{_ORANGE}]\n")
                     continue
-                console.print(f"[dim]  ⟳ Launching reconnaissance...[/dim]\n")
+                console.print(f"[{_GREEN}]  ⟳ Launching reconnaissance…[/{_GREEN}]\n")
                 return _make_args(target=target, ttype=ttype)
 
         except (KeyboardInterrupt, EOFError):
-            console.print("\n[yellow]  ✦ Cancelled[/yellow]")
+            console.print(f"\n[{_ORANGE}]  ✦ Cancelled[/{_ORANGE}]")
             sys.exit(0)
 
 def _basic_menu():
