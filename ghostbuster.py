@@ -806,6 +806,72 @@ class PhoneIntel:
         return out
 
     @staticmethod
+    def _get_allocation_info(country_code: int, national_str: str, line_type: str) -> dict:
+        """Get detailed allocation and registration info based on country and number."""
+        info = {
+            "country": "Unknown",
+            "registration_type": line_type,
+            "portable": True,  # MNP support
+            "sms_capable": True,
+            "voice_capable": True,
+            "data_capable": False,
+            "international_dialing": True,
+            "notes": []
+        }
+
+        # Country-specific details
+        if country_code == 91:  # India
+            info["country"] = "India"
+            info["allocation_body"] = "TRAI (Telecom Regulatory Authority of India)"
+            info["mnp_support"] = "Yes (MNP since 2010)"
+            info["portable"] = True
+
+            # Indian specific details
+            if line_type == "mobile":
+                info["registration_type"] = "Prepaid/Postpaid Mobile"
+                info["sms_capable"] = True
+                info["voice_capable"] = True
+                info["data_capable"] = True
+                info["notes"].append("10-digit mobile number format: 9XXXXXXXXX")
+                info["notes"].append("MNP-aware: Circle info reliable, carrier may have changed")
+            elif line_type == "landline" or line_type == "fixed_line":
+                info["registration_type"] = "Landline/Fixed Line"
+                info["data_capable"] = False
+                info["notes"].append("Fixed-line numbers tied to geographic location")
+            elif line_type == "voip":
+                info["registration_type"] = "VoIP Service"
+                info["portable"] = False
+                info["notes"].append("VoIP numbers not subject to MNP")
+
+        elif country_code == 1:  # USA/Canada
+            info["country"] = "USA/Canada"
+            info["allocation_body"] = "NANPA (North American Numbering Plan)"
+            info["mnp_support"] = "Yes (LNP since 1997)"
+            info["portable"] = True
+            info["notes"].append("10-digit format: (NPA) NXX-XXXX")
+            info["notes"].append("Area code not always current location (VoIP)")
+
+        elif country_code == 44:  # UK
+            info["country"] = "United Kingdom"
+            info["allocation_body"] = "Ofcom (Office of Communications)"
+            info["mnp_support"] = "Yes (2000+)"
+            info["portable"] = True
+
+        elif country_code in (33, 34, 39, 49):  # European countries
+            country_names = {33: "France", 34: "Spain", 39: "Italy", 49: "Germany"}
+            info["country"] = country_names.get(country_code, "Europe")
+            info["allocation_body"] = "National Telecoms Authority"
+            info["mnp_support"] = "Yes (EU regulation)"
+            info["portable"] = True
+
+        else:
+            info["country"] = "International"
+            info["allocation_body"] = "Country-specific regulatory authority"
+            info["mnp_support"] = "Varies by country"
+
+        return info
+
+    @staticmethod
     def _format_variants(parsed) -> dict:
         F = phonenumbers.PhoneNumberFormat
         fmt = phonenumbers.format_number
@@ -1049,6 +1115,12 @@ class PhoneIntel:
         if coords:
             location["maps_pin"] = f"https://www.google.com/maps/@{coords[0]},{coords[1]},6z"
 
+        # Enhanced phone intelligence
+        number_prefix = national_str[:4] if len(national_str) >= 4 else national_str
+
+        # Determine registration/allocation type
+        allocation_info = PhoneIntel._get_allocation_info(parsed.country_code, national_str, line_type)
+
         result = {
             "valid": valid,
             "possible": possible,
@@ -1058,10 +1130,12 @@ class PhoneIntel:
             "region_iso": region_iso,
             "region_name": region_name,
             "national_number": national_str,
+            "number_prefix": number_prefix,
             "carrier": car,
             "line_type": line_type,
             "timezones": timezones,
             "location": location,
+            "allocation": allocation_info,
             "messengers": PhoneIntel._messenger_links(fmts["e164"]),
             "reputation_hints": PhoneIntel._reputation_hints(line_type, car),
             "osint_dorks": PhoneIntel._osint_links(
@@ -1977,6 +2051,30 @@ def _render_phone_panels(target: str, data: dict):
         print(_panel("Location Intelligence", rows_loc, width=90,
                      border_color="\033[38;5;213m",  # pink
                      title_color="\033[38;5;213m"))
+
+    # ── Panel 3b: Allocation & Registration Details ──
+    alloc = data.get("allocation", {})
+    if alloc:
+        rows_alloc = [
+            ("Country",           f"{W}{alloc.get('country','?')}{R}"),
+            ("Regulatory Body",   f"{D}{alloc.get('allocation_body','?')}{R}"),
+            ("Registration Type", f"{Y}{alloc.get('registration_type','?')}{R}"),
+            ("Portable (MNP)",    f"{G}Yes{R}" if alloc.get('portable') else f"{RED}No{R}"),
+            ("SMS Capable",       f"{G}Yes{R}" if alloc.get('sms_capable') else f"{D}No{R}"),
+            ("Voice Capable",     f"{G}Yes{R}" if alloc.get('voice_capable') else f"{D}No{R}"),
+            ("Data Capable",      f"{G}Yes{R}" if alloc.get('data_capable') else f"{D}No{R}"),
+            ("Intl Dialing",      f"{G}Yes{R}" if alloc.get('international_dialing') else f"{D}No{R}"),
+        ]
+        if alloc.get('mnp_support'):
+            rows_alloc.append(("MNP Status", f"{G}{alloc['mnp_support']}{R}"))
+
+        notes = alloc.get('notes', [])
+        for note in notes[:3]:  # Show first 3 notes
+            rows_alloc.append(("Info", f"{D}{note}{R}"))
+
+        print(_panel("Allocation & Registration", rows_alloc, width=90,
+                     border_color="\033[38;5;33m",   # blue
+                     title_color="\033[38;5;33m"))
 
     # ── Panel 4: Messenger Presence ──
     mp = data.get("messenger_presence", {})
