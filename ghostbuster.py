@@ -1798,15 +1798,16 @@ class PresenceIntel:
         kw.setdefault("headers", {"User-Agent": PresenceIntel.UA})
         return await session.get(url, **kw)
 
-    # ── EMAIL presence ──────────────────────────────────────────────────────
+    # ── EMAIL presence (holehe-style, verified endpoints) ────────────────────
     @staticmethod
     async def check_email(session, email: str) -> dict:
         import hashlib
+        email = email.strip()
         results = {}
 
         # Gravatar — a hit proves the email has a public profile/avatar
         try:
-            h = hashlib.md5(email.strip().lower().encode()).hexdigest()
+            h = hashlib.md5(email.lower().encode()).hexdigest()
             async with await PresenceIntel._get(
                     session, f"https://www.gravatar.com/{h}.json") as r:
                 if r.status == 200:
@@ -1825,16 +1826,39 @@ class PresenceIntel:
         except Exception:
             results["Gravatar"] = {"status": "unknown"}
 
-        # GitHub — public account bound to the email's search
+        # Twitter/X — email_available: taken=true → registered
         try:
-            u = email.split("@")[0]
-            async with await PresenceIntel._get(
-                    session, f"https://api.github.com/users/{u}") as r:
-                results["GitHub (by handle)"] = {
-                    "status": "registered" if r.status == 200 else "not_registered",
-                    "hint": f"github.com/{u}" if r.status == 200 else ""}
+            async with await PresenceIntel._get(session,
+                    f"https://api.twitter.com/i/users/email_available.json?email={email}") as r:
+                j = await r.json(content_type=None)
+                results["Twitter/X"] = {"status": "registered"
+                    if j.get("taken") else "not_registered"}
         except Exception:
-            results["GitHub (by handle)"] = {"status": "unknown"}
+            results["Twitter/X"] = {"status": "unknown"}
+
+        # Spotify — signup validate: errors.email present → registered
+        try:
+            async with await PresenceIntel._get(session,
+                    f"https://spclient.wg.spotify.com/signup/public/v1/account"
+                    f"?validate=1&email={email}") as r:
+                j = await r.json(content_type=None)
+                taken = isinstance(j.get("errors"), dict) and "email" in j["errors"] \
+                        and "registered" in str(j["errors"]["email"]).lower()
+                results["Spotify"] = {"status": "registered" if taken else "not_registered"}
+        except Exception:
+            results["Spotify"] = {"status": "unknown"}
+
+        # Firefox / Mozilla accounts — exists:true → registered
+        try:
+            async with session.post("https://api.accounts.firefox.com/v1/account/status",
+                    json={"email": email}, ssl=False,
+                    headers={"User-Agent": PresenceIntel.UA},
+                    timeout=aiohttp.ClientTimeout(total=10)) as r:
+                j = await r.json(content_type=None)
+                results["Firefox"] = {"status": "registered"
+                    if j.get("exists") else "not_registered"}
+        except Exception:
+            results["Firefox"] = {"status": "unknown"}
 
         return results
 
