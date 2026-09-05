@@ -2530,6 +2530,10 @@ MENU_OPTIONS = [
     ("8", "📊", "Bulk Scan",      "bulk",     "Many targets · CSV / JSON / TXT"),
 ]
 
+# Per-vector cyberpunk hues (index matches MENU_OPTIONS order)
+_VECTOR_COLORS = ["#00d7ff", "#5fafff", "#e8e8e8", "#ffaf00",
+                  "#ff5f87", "#00d7ff", "#d0d0d0", "#00ff5f"]
+
 # ── Two-tone wordmark: (green_half, orange_half) per row, padded to a rectangle ──
 _LOGO = [
     ("   ▄████  ██░ ██  ▒█████    ██████ ▄▄▄█████▓", " ▄▄▄▄    █    ██   ██████ ▄▄▄█████▓▓█████  ██▀███  "),
@@ -2560,31 +2564,36 @@ def _rich_menu():
     console = Console()
     W = _box_width(console)
 
-    # ── Command Center band (same width/style as the info box) ──
+    # ── Command Center band (subtle cyan+orange accent, not the whole UI) ──
     console.print()
     cc = Text(justify="center")
     cc.append("⚡ ", style=_ORANGE)
-    cc.append("GHOSTBUSTER", style=f"bold {_GREEN}")
+    cc.append("GHOSTBUSTER", style="bold #00d7ff")
     cc.append("  OSINT COMMAND CENTER", style=f"bold {_ORANGE}")
     console.print(Align.center(
-        Panel(cc, box=rich_box.ROUNDED, border_style=_ORANGE, width=W, padding=(0, 2))
+        Panel(cc, box=rich_box.ROUNDED, border_style="#00d7ff", width=W, padding=(0, 2))
     ))
     console.print()
 
-    # ── Options table (fixed width → columns line up, one row each) ──
-    table = Table(show_header=True, box=rich_box.ROUNDED, border_style=_GREEN,
-                  header_style=f"bold {_INK}", width=W, padding=(0, 1),
-                  title=f"[bold {_ORANGE}]Choose Your Reconnaissance Vector[/bold {_ORANGE}]",
+    # ── Options table — colorful cyberpunk, one distinct hue per vector ──
+    # (per-option label/number color; descriptions stay light-gray for readability)
+    vec_colors = _VECTOR_COLORS
+    DESC = "grey70"
+
+    table = Table(show_header=True, box=rich_box.ROUNDED, border_style="grey42",
+                  header_style="bold white", width=W, padding=(0, 1),
+                  title="[bold #00d7ff]Choose Your Reconnaissance Vector[/bold #00d7ff]",
                   title_justify="center", row_styles=["", "on grey11"], pad_edge=True)
     table.add_column("#",  justify="center", width=3, no_wrap=True)
     table.add_column("Target", justify="left", width=18, no_wrap=True)
     table.add_column("Intelligence Gathered", justify="left", no_wrap=True, overflow="ellipsis")
 
-    for key, icon, label, _t, desc in MENU_OPTIONS:
+    for i, (key, icon, label, _t, desc) in enumerate(MENU_OPTIONS):
+        c = vec_colors[i]
         table.add_row(
-            f"[bold {_ORANGE}]{key}[/bold {_ORANGE}]",
-            f"{icon}  [{_GREEN}]{label}[/{_GREEN}]",
-            f"[{_MUTED}]{desc}[/{_MUTED}]",
+            f"[bold {c}]{key}[/bold {c}]",
+            f"{icon}  [{c}]{label}[/{c}]",
+            f"[{DESC}]{desc}[/{DESC}]",
         )
     console.print(Align.center(table))
     console.print()
@@ -2603,7 +2612,8 @@ def _rich_menu():
                 sys.exit(0)
 
             key, icon, label, ttype, desc = MENU_OPTIONS[int(choice) - 1]
-            console.print(f"\n[bold {_GREEN}]  {icon} {label}[/bold {_GREEN}] [{_MUTED}]selected[/{_MUTED}]")
+            c = _VECTOR_COLORS[int(choice) - 1]
+            console.print(f"\n[bold {c}]  {icon} {label}[/bold {c}] [{_MUTED}]selected[/{_MUTED}]")
 
             if ttype == "bulk":
                 target = Prompt.ask(f"[{_ORANGE}]  📁 File path (CSV/JSON/TXT)[/{_ORANGE}]").strip()
