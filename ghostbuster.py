@@ -2608,17 +2608,6 @@ def _rich_menu():
     console.print(table)
     console.print()
 
-    # ── CLI hint bar ──
-    hint = Text()
-    hint.append("  CLI mode:  ", style="bold grey58")
-    hint.append("ghostbuster <target>", style="bright_cyan")
-    hint.append("   ·   ", style="grey37")
-    hint.append("ghostbuster phone +91XXXXXXXXXX", style="bright_cyan")
-    hint.append("   ·   ", style="grey37")
-    hint.append("ghostbuster --bulk file.txt", style="bright_cyan")
-    console.print(Panel(hint, box=rich_box.ROUNDED, border_style="grey37", padding=(0, 1)))
-    console.print()
-
     # ── Selection loop ──
     valid = [o[0] for o in MENU_OPTIONS]
     while True:
