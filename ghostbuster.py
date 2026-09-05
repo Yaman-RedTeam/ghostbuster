@@ -1720,6 +1720,66 @@ class GraphBuilder:
 
 # ─── Output Formatters ────────────────────────────────────────────────────────
 
+class AISummary:
+    """Optional plain-language summary of the findings, written by an LLM.
+    The model reasons ONLY over data GhostBuster collected — it is told never
+    to invent names, identities, or addresses. Off unless a key is configured."""
+
+    DEFAULT_MODELS = {"anthropic": "claude-sonnet-5",
+                      "openai": "gpt-4o-mini",
+                      "gemini": "gemini-1.5-flash"}
+
+    SYSTEM = ("You are an OSINT analyst. Summarize ONLY the reconnaissance data "
+              "provided as JSON. Never invent names, identities, addresses, or "
+              "facts not present. Clearly separate VERIFIED facts from APPROXIMATE/"
+              "REPORTED ones. Note key risks and pivots. Keep it under 180 words, "
+              "plain language. If data is thin, say so.")
+
+    @staticmethod
+    async def summarize(findings: dict, config: dict) -> Optional[str]:
+        provider = (config.get("ai_provider") or "").lower()
+        if not provider:
+            return None
+        key = (config.get(f"{provider}_key") or config.get("ai_key")
+               or config.get(f"{provider}_api_key"))
+        if not key:
+            return None
+        model = config.get("ai_model") or AISummary.DEFAULT_MODELS.get(provider)
+        payload_json = json.dumps(findings, default=str)[:12000]
+        prompt = f"{AISummary.SYSTEM}\n\nDATA:\n{payload_json}"
+        try:
+            async with aiohttp.ClientSession() as s:
+                if provider == "anthropic":
+                    async with s.post("https://api.anthropic.com/v1/messages",
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                                 "content-type": "application/json"},
+                        json={"model": model, "max_tokens": 400,
+                              "messages": [{"role": "user", "content": prompt}]},
+                        timeout=aiohttp.ClientTimeout(total=45)) as r:
+                        j = await r.json()
+                        return j.get("content", [{}])[0].get("text")
+                elif provider == "openai":
+                    async with s.post("https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {key}"},
+                        json={"model": model, "max_tokens": 400,
+                              "messages": [{"role": "system", "content": AISummary.SYSTEM},
+                                           {"role": "user", "content": payload_json}]},
+                        timeout=aiohttp.ClientTimeout(total=45)) as r:
+                        j = await r.json()
+                        return j["choices"][0]["message"]["content"]
+                elif provider == "gemini":
+                    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                           f"{model}:generateContent?key={key}")
+                    async with s.post(url,
+                        json={"contents": [{"parts": [{"text": prompt}]}]},
+                        timeout=aiohttp.ClientTimeout(total=45)) as r:
+                        j = await r.json()
+                        return j["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            return f"(AI summary unavailable: {e})"
+        return None
+
+
 class PresenceIntel:
     """Account-presence discovery — checks whether a phone/email is registered
     on popular sites by reading the SAME public signup / password-reset
@@ -2779,6 +2839,11 @@ async def main_async(args):
     engine = GhostBusterEngine(config)
     findings = await engine.run(targets)
 
+    # Optional AI summary (only if a provider + key is configured)
+    ai = await AISummary.summarize(findings, config)
+    if ai:
+        findings["ai_summary"] = ai
+
     fmt = args.format
     base = args.output
     if fmt in ("json", "both", "all"):
@@ -2829,6 +2894,15 @@ async def main_async(args):
             _render_email_panels(t["value"], data)
         elif ttype == "image":
             _render_image_panels(t["value"], data)
+
+    # ── AI Summary panel ──
+    if findings.get("ai_summary"):
+        C = "\033[38;5;51m"; D = "\033[38;5;240m"; R = "\033[0m"
+        import textwrap as _tw
+        rows_ai = [("", f"{D}{ln}{R}") for para in findings["ai_summary"].split("\n")
+                   for ln in _tw.wrap(para, 84)] or [("", f"{D}(empty){R}")]
+        print(_panel("🤖 AI Analyst Summary", rows_ai, width=94,
+                     border_color=C, title_color=C))
 
     # ── Bulk risk heatmap (phones) ──
     phone_rows = [(it["target"]["value"], it.get("data", {}).get("risk", {}))

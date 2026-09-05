@@ -17,8 +17,18 @@ twilio_token: ""          #     (SID + Auth Token pair)
 # Proxy (optional)
 proxy: null          # "http://host:port" or "socks5://host:port"
 
+# Account-presence discovery (checks where a phone/email is registered)
+presence: true            # set false to skip the site checks
+
+# AI analyst summary (optional — plain-language summary of findings)
+ai_provider: ""           # anthropic | openai | gemini   (blank = off)
+anthropic_key: ""         # for ai_provider: anthropic
+openai_key: ""            # for ai_provider: openai
+gemini_key: ""            # for ai_provider: gemini
+ai_model: ""              # optional override, else provider default
+
 # Output
-output_format: "json"   # json | xml | both
+output_format: "json"   # json | xml | md | html | both | all
 graph: false
 
 # Logging
