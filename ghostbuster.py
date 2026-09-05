@@ -1090,38 +1090,39 @@ class PhoneIntel:
                 india_circle, india_operator = match
 
         # ── Location intelligence ──
+        # Philosophy: SHOW every useful signal a free source provides, and
+        # LABEL its accuracy — never silently drop approximate data.
         coords = PhoneIntel.COUNTRY_COORDS.get(parsed.country_code)
-        # Prefer geocoder's specific region (e.g. "Baghpat, UP") if it isn't
-        # just the country name; else fall back to country name.
-        specific = region_name if region_name and region_name.lower() != \
-            _country_english_name(region_iso).lower() else None
+        # Geocoder's sub-country region (e.g. "Baghpat, UP") if it's more
+        # specific than just the country name.
+        geocoder_region = region_name if (region_name and region_name.lower() !=
+            _country_english_name(region_iso).lower()) else None
+        specific = geocoder_region
 
-        # ⚠️ For Indian MOBILE numbers the phonenumbers geocoder region is
-        # unreliable — Jio allocates numbers pan-India (geography-independent)
-        # and MNP scrambles the rest. Trust ONLY our circle table for India;
-        # if there's no circle match, DON'T show the geocoder's guess as fact.
-        geocoder_unreliable = False
+        # Indian MOBILE numbers: geocoder/circle data is APPROXIMATE (Jio is
+        # pan-India, MNP scrambles operator↔circle). We still SHOW it — flagged
+        # approximate — instead of hiding it. Circle table wins as the label.
+        region_approx = False
         if parsed.country_code == 91 and line_type in ("mobile", "fixed_or_mobile"):
+            region_approx = True
             if india_circle:
                 specific = f"{india_circle} circle"
-            else:
-                # Suppress the misleading geocoder region for Indian mobiles
-                geocoder_unreliable = specific is not None
-                specific = None
+            # else keep geocoder_region as the (approximate) best guess
         elif india_circle and not specific:
             specific = f"{india_circle} circle"
 
         map_query = (india_circle or specific or region_iso)
         location = {
             "specific_region": specific,
-            "geocoder_region": region_name if geocoder_unreliable else None,
-            "geocoder_unreliable": geocoder_unreliable,
+            "geocoder_region": geocoder_region,
+            "region_approx":   region_approx,
             "india_circle":    india_circle,
             "india_original_operator": india_operator,
             "country_name":    _country_english_name(region_iso) if region_iso != "??"
                                else region_name,
             "region_iso":      region_iso,
             "coords":          {"lat": coords[0], "lon": coords[1]} if coords else None,
+            "coords_approx":   True,   # country-centroid, never subscriber-exact
             "google_maps":     f"https://www.google.com/maps/search/{map_query.replace(' ', '+')}"
                                 if map_query else None,
             "osm":             f"https://www.openstreetmap.org/search?query={map_query.replace(' ', '+')}"
@@ -2067,39 +2068,81 @@ def _render_phone_panels(target: str, data: dict):
     print(_panel("Validity & Format", rows2, width=72,
                  border_color=O, title_color=O))
 
-    # ── Panel 3: Location Intelligence ──
+    # Accuracy labels (consistent across the whole phone report)
+    VER    = f"{G}✓ VERIFIED{R}"
+    HIGH   = f"{G}✓ HIGH CONFIDENCE{R}"
+    REP    = f"{Y}~ REPORTED{R}"
+    APPROX = f"{Y}~ APPROXIMATE{R}"
+    OLD    = f"{O}⚠ POSSIBLY OUTDATED{R}"
+    UNK    = f"{D}? UNKNOWN{R}"
+    NF     = f"{RED}✗ NOT FOUND{R}"
+
+    # ── Panel 3: Location Intelligence (show-all + honest accuracy labels) ──
     loc = data.get("location", {})
     if loc:
+        def _lrow(label, value, tag):
+            return (label, f"{W}{value}{R}   {tag}")
+
         rows_loc = []
+        rows_loc.append(_lrow("Country",
+            f"{loc.get('country_name','?')} ({loc.get('region_iso','??')})", VER))
         if loc.get("india_circle"):
-            rows_loc.append(("Circle",  f"{Y}📍 {loc['india_circle']} {G}✓ reliable "
-                                        f"{D}(MNP-proof){R}"))
-            if loc.get("india_original_operator"):
-                rows_loc.append(("Operator (at launch)",
-                                 f"{D}{loc['india_original_operator']} — "
-                                 f"NOT the current carrier; likely ported (MNP){R}"))
-        elif loc.get("specific_region"):
-            rows_loc.append(("Region",  f"{Y}📍 {loc['specific_region']}{R}"))
-        elif loc.get("geocoder_unreliable"):
-            rows_loc.append(("Region",
-                f"{RED}unknown{R} {D}(Jio/MNP number — not geo-bound){R}"))
-            rows_loc.append(("  ↳ note",
-                f"{D}geocoder guessed '{loc.get('geocoder_region')}' — unreliable, ignore{R}"))
-        rows_loc.append(("Country",     f"{W}{loc.get('country_name','?')} "
-                                        f"{D}({loc.get('region_iso','??')}){R}"))
+            rows_loc.append(_lrow("Telecom Circle", loc["india_circle"], REP))
+        # Region/Area only if the geocoder gives something beyond the circle
+        reg = loc.get("geocoder_region")
+        if not reg and not loc.get("india_circle"):
+            reg = loc.get("specific_region")
+        if reg and reg != loc.get("india_circle"):
+            rows_loc.append(_lrow("Region / Area", reg,
+                             APPROX if loc.get("region_approx") else REP))
+        elif not loc.get("india_circle") and not reg:
+            rows_loc.append(("Region / Area",
+                f"{D}no sub-country region from free sources{R}   {UNK}"))
         c = loc.get("coords")
         if c:
-            rows_loc.append(("Coords",  f"{C}{c['lat']:.4f}, {c['lon']:.4f}{R}  "
-                                        f"{D}(country centroid){R}"))
+            rows_loc.append(_lrow("Coordinates", f"{c['lat']:.4f}, {c['lon']:.4f}", APPROX))
+            rows_loc.append(("  ↳ note",
+                f"{D}country centroid — NOT the subscriber's actual point{R}"))
+        tzs = data.get("timezones", [])
+        if tzs:
+            rows_loc.append(_lrow("Timezone", ", ".join(tzs), REP))
         if loc.get("google_maps"):
             rows_loc.append(("Google Maps", f"{D}{loc['google_maps']}{R}"))
-        if loc.get("maps_pin"):
-            rows_loc.append(("Map Pin",     f"{D}{loc['maps_pin']}{R}"))
         if loc.get("osm"):
             rows_loc.append(("OpenStreetMap", f"{D}{loc['osm']}{R}"))
-        print(_panel("Location Intelligence", rows_loc, width=90,
+        print(_panel("Location Intelligence", rows_loc, width=94,
                      border_color="\033[38;5;213m",  # pink
                      title_color="\033[38;5;213m"))
+
+        # Always print the honesty warning with location data
+        print(f"{O}  ⚠ LOCATION WARNING:{R} {D}Telecom-circle, GeoIP, database and historical{R}")
+        print(f"{D}    allocation data may be outdated or approximate — this is NOT the{R}")
+        print(f"{D}    subscriber's exact current physical location.{R}")
+
+        # ── Location Cross-Check (compare every available source) ──
+        xcheck = [("number country code", loc.get("country_name", "?"), "VERIFIED", "HIGH")]
+        if loc.get("india_circle"):
+            xcheck.append(("India circle table", loc["india_circle"], "REPORTED", "MEDIUM"))
+        if loc.get("geocoder_region"):
+            xcheck.append(("phonenumbers geocoder", loc["geocoder_region"], "REPORTED", "MEDIUM"))
+        provs_loc = data.get("providers", {})
+        for name in sorted(provs_loc.keys()):
+            r = provs_loc[name]
+            if r.get("status") != "ran" or name == "offline":
+                continue
+            d = r.get("data")
+            v = None
+            if isinstance(d, dict):
+                v = (d.get("location") or d.get("region") or d.get("country")
+                     or d.get("country_name"))
+            xcheck.append((name, v or "No Data",
+                           "REPORTED" if v else "—", "MEDIUM" if v else "—"))
+        if len(xcheck) >= 2:
+            rows_x = [(src, f"{W}{val}{R}   {D}{st} · {conf}{R}")
+                      for src, val, st, conf in xcheck]
+            print(_panel("Location Cross-Check (multi-source)", rows_x, width=94,
+                         border_color=C, title_color=C))
+            print(f"{D}  Consensus: country / circle-level  ·  Confidence: MEDIUM{R}")
 
     # ── Panel 3b: Allocation & Registration Details ──
     alloc = data.get("allocation", {})
@@ -2142,63 +2185,68 @@ def _render_phone_panels(target: str, data: dict):
         print(_panel("Messenger Presence & Pivots", rows3, width=72,
                      border_color=C, title_color=C))
 
-    # ── Panel: CONSENSUS (majority-vote across all providers) ──
+    # ── Panel: Carrier Intelligence (original + current + MNP + confidence) ──
+    #   Show ALL carrier signals; never hide the original allocation just
+    #   because it may be outdated. Label every field's trust level.
     con = data.get("consensus", {})
-    if con:
-        def conf_color(pct):
-            if pct >= 75: return G
-            if pct >= 50: return Y
-            return RED
-        def bar(pct):
-            filled = round(pct / 10)
-            return "█" * filled + "░" * (10 - filled)
+    cc  = con.get("carrier", {}) if con else {}
+    def _bar(pct):
+        f = round(pct / 10); return "█" * f + "░" * (10 - f)
 
-        # Only fields that are actually reliable via free/offline sources:
-        # validity + line_type are algorithmic/stable. Carrier is NOT — it
-        # changes with MNP and free sources hold stale data — so we show it
-        # honestly labelled, never as "current carrier".
-        rows_c = []
-        cv = con.get("valid", {})
-        if cv.get("value") is not None:
-            pct = cv.get("confidence", 0)
-            vs = f"{G}VALID{R}" if cv["value"] else f"{RED}INVALID{R}"
-            rows_c.append(("Validity", f"{vs}  {D}{bar(pct)} {pct}%{R}"))
-        ct = con.get("line_type", {})
-        if ct.get("value"):
-            pct = ct.get("confidence", 0)
-            rows_c.append(("Line Type",
-                f"{conf_color(pct)}{ct['value']}{R}  {D}{bar(pct)} {pct}%{R}"))
-        cc = con.get("carrier", {})
-        if cc.get("has_live") and cc.get("defunct"):
-            # Provider returned a shut-down operator → number was ported;
-            # current carrier is genuinely unknown.
-            srcs = ", ".join(cc.get("sources", []))
-            rows_c.append(("Carrier (current)",
-                f"{RED}unknown — definitely ported{R}"))
-            rows_c.append(("  ↳ why",
-                f"{D}{srcs} says '{cc['value']}' — that operator is shut down{R}"))
-        elif cc.get("has_live"):
-            # Live API providers track ported numbers — treat as best current guess
-            pct = cc.get("confidence", 0)
-            srcs = ", ".join(cc.get("sources", []))
-            rows_c.append(("Carrier (current)",
-                f"{G}{cc['value']}{R}  {conf_color(pct)}{bar(pct)} {pct}%{R}  "
-                f"{D}via {srcs}{R}"))
-            if cc.get("ported") and cc.get("original_alloc"):
-                rows_c.append(("  ↳ MNP",
-                    f"{Y}ported{R} {D}— originally {cc['original_alloc']}{R}"))
-            if cc.get("disputed"):
-                allv = ", ".join(f"{k}({v})" for k, v in cc.get("all", {}).items())
-                rows_c.append(("  ↳ providers differ", f"{D}{allv}{R}"))
-        elif cc.get("original_alloc"):
-            # No live provider ran — only offline static data available
-            rows_c.append(("Carrier (original alloc)",
-                f"{Y}{cc['original_alloc']}{R}  "
-                f"{RED}⚠ static data — may be ported (add a provider key){R}"))
-        if rows_c:
-            print(_panel("⚡ VERIFIED FACTS  (what we can trust)", rows_c, width=94,
-                         border_color="\033[38;5;201m",   # magenta
-                         title_color="\033[38;5;201m"))
+    orig_carrier = (cc.get("original_alloc") or data.get("carrier")
+                    or loc.get("india_original_operator"))
+    if orig_carrier and orig_carrier.lower() in ("unknown", "none", ""):
+        orig_carrier = None
+
+    rows_c = []
+    # Validity + network type — algorithmic, high confidence
+    if con and con.get("valid", {}).get("value") is not None:
+        pct = con["valid"].get("confidence", 0)
+        vs = f"{G}VALID{R}" if con["valid"]["value"] else f"{RED}INVALID{R}"
+        rows_c.append(("Validity", f"{vs}   {HIGH}  {D}{_bar(pct)} {pct}%{R}"))
+    elif data.get("valid") is not None:
+        vs = f"{G}VALID{R}" if data["valid"] else f"{RED}INVALID{R}"
+        rows_c.append(("Validity", f"{vs}   {HIGH}"))
+    net = (con.get("line_type", {}).get("value") if con else None) or data.get("line_type")
+    if net:
+        rows_c.append(("Network Type", f"{Y}{net}{R}   {VER}"))
+
+    # Original carrier — ALWAYS shown
+    if orig_carrier:
+        rows_c.append(("Original Carrier", f"{W}{orig_carrier}{R}   {OLD}"))
+        rows_c.append(("  ↳ note",
+            f"{D}number-series allocation — may be ported (MNP); not current-proof{R}"))
+    else:
+        rows_c.append(("Original Carrier", f"{D}No Data{R}   {UNK}"))
+
+    # Current carrier — from live providers when available
+    if cc.get("has_live") and cc.get("defunct"):
+        srcs = ", ".join(cc.get("sources", []))
+        rows_c.append(("Current Carrier", f"{RED}Unknown — definitely ported{R}   {UNK}"))
+        rows_c.append(("  ↳ why", f"{D}{srcs} reports '{cc['value']}' — operator is shut down{R}"))
+        rows_c.append(("MNP Status", f"{Y}Ported{R}"))
+    elif cc.get("has_live"):
+        pct = cc.get("confidence", 0)
+        rows_c.append(("Current Carrier", f"{G}{cc['value']}{R}   {HIGH}  {D}{_bar(pct)} {pct}%{R}"))
+        rows_c.append(("Source", f"{D}{', '.join(cc.get('sources', [])) or 'live provider'}{R}"))
+        rows_c.append(("MNP Status",
+            f"{Y}Ported — originally {cc.get('original_alloc','?')}{R}" if cc.get("ported")
+            else f"{G}No port detected{R}"))
+        if cc.get("disputed"):
+            allv = ", ".join(f"{k}({v})" for k, v in cc.get("all", {}).items())
+            rows_c.append(("  ↳ providers differ", f"{D}{allv}{R}"))
+    else:
+        rows_c.append(("Current Carrier", f"{D}Unknown{R}   {UNK}"))
+        rows_c.append(("MNP Status",
+            f"{Y}Possible MNP / porting — add a provider key for live data{R}"))
+
+    if loc.get("india_circle"):
+        rows_c.append(("Telecom Circle", f"{W}{loc['india_circle']}{R}   {REP}"))
+
+    if rows_c:
+        print(_panel("Carrier Intelligence", rows_c, width=94,
+                     border_color="\033[38;5;201m",   # magenta
+                     title_color="\033[38;5;201m"))
 
     # ── Panel: Provider Status (like Numint) ──
     provs = data.get("providers", {})
