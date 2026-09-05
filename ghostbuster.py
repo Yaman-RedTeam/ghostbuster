@@ -45,6 +45,20 @@ try:
 except ImportError:
     PHONE_AVAILABLE = False
 
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+    from rich.align import Align
+    from rich.box import DOUBLE, ROUNDED, HEAVY
+    from rich.prompt import Prompt
+    from rich.columns import Columns
+    from rich import box as rich_box
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 # ─── Logging Setup ──────────────────────────────────────────────────────────
 
 def setup_logging(log_file: str = "ghostbuster.log", level: str = "INFO"):
@@ -2481,103 +2495,205 @@ BANNER = f"""
 """
 
 def print_banner():
+    if RICH_AVAILABLE:
+        try:
+            _print_rich_banner()
+            return
+        except Exception:
+            pass
     try:
         print(BANNER)
     except UnicodeEncodeError:
         pass
 
-def interactive_menu():
-    """Interactive menu for selecting reconnaissance type."""
-    _G = "\033[38;5;46m"      # neon green
-    _O = "\033[38;5;208m"     # neon orange
-    _C = "\033[38;5;51m"      # cyan
-    _Y = "\033[38;5;226m"     # yellow
-    _R = "\033[0m"            # reset
-    _D = "\033[38;5;240m"     # dim
-
-    menu_options = [
-        ("1", "📱 Phone Number", "phone", "Analyze phone numbers, carriers, location, MNP status"),
-        ("2", "🌍 IP Address", "ip", "GeoIP lookup, ASN, reverse DNS, infrastructure"),
-        ("3", "🔗 Domain", "domain", "WHOIS, DNS, subdomains, SSL certificates"),
-        ("4", "📧 Email Address", "email", "Email parsing, breach checking (HIBP)"),
-        ("5", "🔍 Username", "username", "Find social media profiles, linked accounts"),
-        ("6", "🌐 Website URL", "url", "URL expansion, redirects, domain analysis"),
-        ("7", "🖼️ Image File", "image", "EXIF metadata, geolocation, camera info"),
-        ("8", "📊 Bulk Scan", "bulk", "Scan multiple targets from file (CSV/JSON/TXT)"),
+def _print_rich_banner():
+    """Gradient ASCII banner rendered with rich (width-aware)."""
+    art = [
+        "   ▄████  ██░ ██  ▒█████    ██████ ▄▄▄█████▓ ▄▄▄▄    █    ██   ██████ ▄▄▄█████▓▓█████  ██▀███  ",
+        "  ██▒ ▀█▒▓██░ ██▒▒██▒  ██▒▒██    ▒ ▓  ██▒ ▓▒▓█████▄  ██  ▓██▒▒██    ▒ ▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒",
+        " ▒██░▄▄▄░▒██▀▀██░▒██░  ██▒░ ▓██▄   ▒ ▓██░ ▒░▒██▒ ▄██▓██  ▒██░░ ▓██▄   ▒ ▓██░ ▒░▒███   ▓██ ░▄█ ▒",
+        " ░▓█  ██▓░▓█ ░██ ▒██   ██░  ▒   ██▒░ ▓██▓ ░ ▒██░█▀  ▓▓█  ░██░  ▒   ██▒░ ▓██▓ ░ ▒▓█  ▄ ▒██▀▀█▄  ",
+        " ░▒▓███▀▒░▓█▒░██▓░ ████▓▒░▒██████▒▒  ▒██▒ ░ ░▓█  ▀█▓▒▒█████▓ ▒██████▒▒  ▒██▒ ░ ░▒████▒░██▓ ▒██▒",
+        "  ░▒   ▒  ▒ ░░▒░▒░ ▒░▒░▒░ ▒ ▒▓▒ ▒ ░  ▒ ░░   ░▒▓███▀▒░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░  ▒ ░░   ░░ ▒░ ░░ ▒▓ ░▒▓░",
+        "   ░   ░  ▒ ░▒░ ░  ░ ▒ ▒░ ░ ░▒  ░ ░    ░    ▒░▒   ░ ░░▒░ ░ ░ ░ ░▒  ░ ░    ░     ░ ░  ░  ░▒ ░ ▒░",
+        " ░ ░   ░  ░  ░░ ░░ ░ ░ ▒  ░  ░  ░    ░       ░    ░  ░░░ ░ ░ ░  ░  ░    ░         ░     ░░   ░ ",
+        "       ░  ░  ░  ░    ░ ░        ░            ░         ░           ░              ░  ░   ░     ",
     ]
+    # green → cyan gradient down the rows
+    grad = ["#00ff5f", "#00ff87", "#00ffaf", "#00ffd7", "#00ffff",
+            "#00d7ff", "#00afff", "#00afd7", "#0087af"]
+    console = Console()
+    console.print()
+
+    # If terminal is too narrow for the 96-wide art, use a compact wordmark.
+    if console.width < 98:
+        compact = Text()
+        compact.append("👻 ", style="bold #00ff5f")
+        for i, ch in enumerate("GHOSTBUSTER"):
+            compact.append(ch, style=f"bold {grad[i % len(grad)]}")
+        console.print(Align.center(compact))
+    else:
+        banner = Text()
+        for i, line in enumerate(art):
+            banner.append(line + "\n", style=f"bold {grad[i % len(grad)]}", )
+        banner.no_wrap = True
+        console.print(Align.center(banner))
+
+    sub = Text()
+    sub.append("👻 GhostBuster", style="bold #00ff5f")
+    sub.append("  ·  ", style="grey37")
+    sub.append("OSINT Reconnaissance Framework", style="bright_white")
+    sub.append("  ·  ", style="grey37")
+    sub.append("v1.1.0", style="bold #00ffd7")
+    console.print(Align.center(
+        Panel(sub, box=rich_box.HEAVY, border_style="#00ff87", expand=False,
+              padding=(0, 3),
+              subtitle="[grey58]Yaman.RedTeam · Authorized Testing Only[/grey58]")
+    ))
+
+MENU_OPTIONS = [
+    ("1", "📱", "Phone Number",   "phone",    "Carrier, location, MNP status, messenger presence"),
+    ("2", "🌍", "IP Address",     "ip",       "GeoIP, ASN, reverse DNS, Shodan infrastructure"),
+    ("3", "🔗", "Domain",         "domain",   "WHOIS, DNS, subdomains, SSL certificates"),
+    ("4", "📧", "Email Address",  "email",    "Email parsing, breach checking (HIBP)"),
+    ("5", "🔍", "Username",       "username", "Find social profiles across 24+ platforms"),
+    ("6", "🌐", "Website URL",    "url",      "URL expansion, redirect chains, domain intel"),
+    ("7", "🖼️",  "Image File",     "image",    "EXIF metadata, GPS geolocation, camera info"),
+    ("8", "📊", "Bulk Scan",      "bulk",     "Scan multiple targets from CSV / JSON / TXT"),
+]
+
+def _make_args(target=None, ttype=None, bulk=None):
+    return type('Args', (), {
+        'target': target, 'value': None, 'type': ttype, 'bulk': bulk,
+        'config': 'config.yaml', 'output': 'ghostbuster_report',
+        'format': 'json', 'graph': False, 'log_level': 'INFO'
+    })()
+
+def _rich_menu():
+    """Premium rich-powered interactive menu."""
+    console = Console()
+
+    # ── Header band ──
+    console.print()
+    header = Text()
+    header.append("  👻  ", style="bold bright_green")
+    header.append("G H O S T B U S T E R", style="bold bright_green")
+    header.append("   OSINT Command Center", style="bright_white")
+    console.print(Align.center(
+        Panel(Align.center(header), box=rich_box.DOUBLE,
+              border_style="bright_green", padding=(0, 2),
+              subtitle="[dim]v1.1.0 · Yaman.RedTeam · Authorized Testing Only[/dim]")
+    ))
+    console.print()
+
+    # ── Options table (2-column card grid) ──
+    palette = ["bright_green", "bright_cyan", "bright_magenta", "yellow",
+               "bright_blue", "bright_red", "magenta", "green"]
+
+    table = Table(show_header=True, box=rich_box.ROUNDED, border_style="grey37",
+                  header_style="bold bright_white on grey19", expand=True,
+                  padding=(0, 1), title="[bold bright_cyan]⚡ Choose Your Reconnaissance Vector[/bold bright_cyan]",
+                  title_justify="center")
+    table.add_column("#", justify="center", style="bold", width=4)
+    table.add_column("Target", justify="left", width=22)
+    table.add_column("Intelligence Gathered", justify="left", style="dim", overflow="fold")
+
+    for i, (key, icon, label, _, desc) in enumerate(MENU_OPTIONS):
+        color = palette[i % len(palette)]
+        table.add_row(
+            f"[{color}]{key}[/{color}]",
+            f"{icon}  [{color}]{label}[/{color}]",
+            desc
+        )
+    console.print(table)
+    console.print()
+
+    # ── CLI hint bar ──
+    hint = Text()
+    hint.append("  CLI mode:  ", style="bold grey58")
+    hint.append("ghostbuster <target>", style="bright_cyan")
+    hint.append("   ·   ", style="grey37")
+    hint.append("ghostbuster phone +91XXXXXXXXXX", style="bright_cyan")
+    hint.append("   ·   ", style="grey37")
+    hint.append("ghostbuster --bulk file.txt", style="bright_cyan")
+    console.print(Panel(hint, box=rich_box.ROUNDED, border_style="grey37", padding=(0, 1)))
+    console.print()
+
+    # ── Selection loop ──
+    valid = [o[0] for o in MENU_OPTIONS]
+    while True:
+        try:
+            choice = Prompt.ask(
+                "[bold bright_green]►[/bold bright_green] [bright_white]Select vector[/bright_white]",
+                choices=valid + ["q"], show_choices=False, default="1"
+            ).strip().lower()
+
+            if choice == 'q':
+                console.print("[yellow]  ✦ Exiting GhostBuster. Stay ethical! 👻[/yellow]")
+                sys.exit(0)
+
+            key, icon, label, ttype, desc = MENU_OPTIONS[int(choice) - 1]
+            console.print(f"\n[bold {palette[int(choice)-1]}]  {icon} {label}[/bold {palette[int(choice)-1]}] [dim]selected[/dim]")
+
+            if ttype == "bulk":
+                target = Prompt.ask("[bright_cyan]  📁 File path (CSV/JSON/TXT)[/bright_cyan]").strip()
+                if not target:
+                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    continue
+                return _make_args(bulk=target, ttype="bulk")
+            else:
+                target = Prompt.ask(f"[bright_cyan]  🎯 Enter {label}[/bright_cyan]").strip()
+                if not target:
+                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    continue
+                console.print(f"[dim]  ⟳ Launching reconnaissance...[/dim]\n")
+                return _make_args(target=target, ttype=ttype)
+
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]  ✦ Cancelled[/yellow]")
+            sys.exit(0)
+
+def _basic_menu():
+    """Fallback plain-ANSI menu when rich is unavailable."""
+    _G, _O, _C = "\033[38;5;46m", "\033[38;5;208m", "\033[38;5;51m"
+    _Y, _R, _D = "\033[38;5;226m", "\033[0m", "\033[38;5;240m"
 
     print(f"\n{_G}{'='*80}{_R}")
     print(f"{_O}Choose a reconnaissance type:{_R}\n")
-
-    for key, label, _, desc in menu_options:
-        print(f"{_Y}{key}{_R} {label}")
+    for key, icon, label, _, desc in MENU_OPTIONS:
+        print(f"{_Y}{key}{_R} {icon} {label}")
         print(f"   {_D}{desc}{_R}\n")
-
-    print(f"{_O}Or use command-line mode:{_R}")
-    print(f"   {_C}ghostbuster <target>{_R}     {_D}(auto-detect type){_R}")
-    print(f"   {_C}ghostbuster phone +91XXXXXXXXXX{_R}")
-    print(f"   {_C}ghostbuster --bulk targets.txt{_R}\n")
-
     print(f"{_G}{'='*80}{_R}\n")
 
+    valid = [o[0] for o in MENU_OPTIONS]
     while True:
         try:
             choice = input(f"{_O}Enter choice (1-8) or 'q' to quit: {_R}").strip().lower()
-
             if choice == 'q':
                 print(f"{_Y}Exiting...{_R}")
                 sys.exit(0)
-
-            if choice not in ["1", "2", "3", "4", "5", "6", "7", "8"]:
+            if choice not in valid:
                 print(f"{_G}Invalid choice. Please try again.{_R}\n")
                 continue
-
-            # Get the selected option
-            selected = menu_options[int(choice) - 1]
-            target_type = selected[2]
-
-            # Get input
-            if target_type == "bulk":
+            _, _, label, ttype, _ = MENU_OPTIONS[int(choice) - 1]
+            if ttype == "bulk":
                 target = input(f"{_C}Enter file path (CSV/JSON/TXT): {_R}").strip()
                 if not target:
-                    print(f"{_Y}Cancelled.{_R}\n")
-                    continue
-                return type('Args', (), {
-                    'target': None,
-                    'value': None,
-                    'type': target_type,
-                    'bulk': target,
-                    'config': 'config.yaml',
-                    'output': 'ghostbuster_report',
-                    'format': 'json',
-                    'graph': False,
-                    'log_level': 'INFO'
-                })()
-            else:
-                prompt = f"{_C}Enter {selected[1].split()[1:]} target: {_R}"
-                target = input(prompt).strip()
-                if not target:
-                    print(f"{_Y}Cancelled.{_R}\n")
-                    continue
-
-            return type('Args', (), {
-                'target': target,
-                'value': None,
-                'type': target_type,
-                'bulk': None,
-                'config': 'config.yaml',
-                'output': 'ghostbuster_report',
-                'format': 'json',
-                'graph': False,
-                'log_level': 'INFO'
-            })()
-
-        except KeyboardInterrupt:
+                    print(f"{_Y}Cancelled.{_R}\n"); continue
+                return _make_args(bulk=target, ttype="bulk")
+            target = input(f"{_C}Enter {label} target: {_R}").strip()
+            if not target:
+                print(f"{_Y}Cancelled.{_R}\n"); continue
+            return _make_args(target=target, ttype=ttype)
+        except (KeyboardInterrupt, EOFError):
             print(f"\n{_Y}Cancelled.{_R}")
             sys.exit(0)
-        except Exception as e:
-            print(f"{_G}Error: {e}{_R}\n")
-            continue
+
+def interactive_menu():
+    """Interactive menu — rich UI if available, else plain fallback."""
+    if RICH_AVAILABLE:
+        return _rich_menu()
+    return _basic_menu()
 
 def main():
     print_banner()
