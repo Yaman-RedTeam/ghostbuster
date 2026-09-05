@@ -949,10 +949,11 @@ class PhoneIntel:
         providers.append(("offline",
             "internal://phonenumbers", None, None))
 
-        # Numverify (apilayer) — key required
+        # Numverify (apilayer) — key required. Use HTTPS: plain HTTP:80 is
+        # flaky under aiohttp/proxied networks, and HTTPS returns full data.
         if cfg.get("numverify_key"):
             providers.append(("numverify",
-                f"http://apilayer.net/api/validate?access_key={cfg['numverify_key']}"
+                f"https://apilayer.net/api/validate?access_key={cfg['numverify_key']}"
                 f"&number={num_no_plus}&country_code=&format=1", None, None))
 
         # AbstractAPI phone-validation — key required
