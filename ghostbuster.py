@@ -1871,6 +1871,17 @@ def _panel(title: str, rows: list[tuple], width: int = 70,
     return "\n".join(lines)
 
 
+def mask_phone_number(phone: str) -> tuple[str, str]:
+    """Mask phone number: show first 4 chars, hide rest.
+    Returns (masked, full) e.g. (+91987..., +919876543210)"""
+    clean = ''.join(c for c in phone if c.isdigit() or c == '+')
+    if len(clean) <= 4:
+        return clean, clean
+    shown = clean[:4]
+    hidden = '*' * (len(clean) - 4)
+    masked = shown + hidden
+    return masked, clean
+
 def _render_phone_panels(target: str, data: dict):
     G = "\033[38;5;46m"    # green
     O = "\033[38;5;208m"   # orange
@@ -1891,9 +1902,12 @@ def _render_phone_panels(target: str, data: dict):
     poss   = data.get("possible")
     valid_str = f"{G}VALID{R}" if valid else f"{RED}INVALID{R}"
 
+    # Mask phone number for display
+    masked_num, full_num = mask_phone_number(target)
+
     # ── Panel 1: Intelligence Profile ──
     rows1 = [
-        ("Number",   f"{C}{fmts.get('e164', target)}{R}"),
+        ("Number",   f"{C}{masked_num}{R}  {D}(masked for privacy){R}"),
         ("National", f"{W}{fmts.get('national', '?')}{R}"),
         ("Country",  f"{flag}  {W}{data.get('region_name','?')} "
                      f"{D}({data.get('region_iso','??')} · +{data.get('country_code','?')}){R}"),
@@ -1913,11 +1927,17 @@ def _render_phone_panels(target: str, data: dict):
                  border_color=G, title_color=G))
 
     # ── Panel 2: Validity & Format ──
+    def mask_format(fmt_val):
+        if not fmt_val or fmt_val == '?':
+            return fmt_val
+        masked, _ = mask_phone_number(fmt_val)
+        return masked
+
     rows2 = [
-        ("E.164",         f"{C}{fmts.get('e164','?')}{R}"),
-        ("International", f"{W}{fmts.get('international','?')}{R}"),
+        ("E.164",         f"{C}{mask_format(fmts.get('e164','?'))}{R}"),
+        ("International", f"{W}{mask_format(fmts.get('international','?'))}{R}"),
         ("National",      f"{W}{fmts.get('national','?')}{R}"),
-        ("RFC3966",       f"{D}{fmts.get('rfc3966','?')}{R}"),
+        ("RFC3966",       f"{D}{mask_format(fmts.get('rfc3966','?'))}{R}"),
         ("Possible",      f"{G}yes{R}" if poss  else f"{RED}no{R}"),
         ("Valid",         f"{G}yes{R}" if valid else f"{RED}no{R}"),
     ]
