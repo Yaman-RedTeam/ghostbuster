@@ -1910,21 +1910,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ghostbuster",
         description="GhostBuster OSINT Framework — authorized penetration testing tool",
-        epilog="Simple usage:  ghostbuster <target>   (type auto-detected)\n"
-               "Explicit    :  ghostbuster phone +911234567890\n"
-               "Bulk        :  ghostbuster bulk targets.txt",
+        epilog="Just run:  ghostbuster\n"
+               "An interactive menu lets you pick a target type "
+               "(phone / IP / domain / email / username / URL / image / bulk).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("target", nargs="?", help="Target value (IP/domain/URL/email/phone/username/image) — type auto-detected")
-    p.add_argument("value",  nargs="?", help=argparse.SUPPRESS)  # for explicit-type form: `ghostbuster phone +91...`
-    p.add_argument("--type", "-t", choices=["ip","domain","url","username","email","phone","image"],
-                   help="Force target type (skip auto-detection)")
-    p.add_argument("--bulk", "-b", metavar="FILE", help="Bulk process a CSV/JSON/TXT file")
-    p.add_argument("-c", "--config", default="config.yaml")
-    p.add_argument("-o", "--output", default="ghostbuster_report")
-    p.add_argument("-f", "--format", choices=["json","xml","both"], default="json")
-    p.add_argument("--graph", action="store_true", help="Render relationship PNG")
-    p.add_argument("--log-level", default="INFO")
     return p
 
 # ─── Rich boxed panel renderer (Numint-style) ───────────────────────────────
@@ -2669,13 +2659,15 @@ def interactive_menu():
 
 def main():
     print_banner()
-    parser = build_parser()
-    args = parser.parse_args()
 
-    # Show interactive menu if no arguments provided
-    if not args.target and not args.bulk:
-        args = interactive_menu()
+    # The interactive selection menu is the only entry point now.
+    # (The old direct-command mode `ghostbuster <target>` has been removed —
+    #  use the menu to pick what to investigate.)
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        build_parser().print_help()
+        return
 
+    args = interactive_menu()
     asyncio.run(main_async(args))
 
 if __name__ == "__main__":
