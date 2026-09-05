@@ -1173,7 +1173,46 @@ class PhoneIntel:
             result["consensus"] = PhoneIntel.compute_consensus(
                 providers, offline_hint)
 
+        result["risk"] = PhoneIntel.compute_risk(result)
         return result
+
+    @staticmethod
+    def compute_risk(result: dict) -> dict:
+        """0-100 spam/fraud risk from all available signals. Uses live IPQS
+        fraud_score when present; else derives from line type / carrier."""
+        score, factors = 0, []
+        if not result.get("valid"):
+            return {"score": 0, "level": "N/A", "factors": ["number is invalid"]}
+
+        lt = (result.get("line_type") or "").lower()
+        car = (result.get("carrier") or "").lower()
+
+        # Live IPQS fraud score is authoritative if a provider returned one
+        ipqs = None
+        for name, r in (result.get("providers") or {}).items():
+            d = r.get("data") if isinstance(r, dict) else None
+            if isinstance(d, dict) and d.get("fraud_score") is not None:
+                try:
+                    ipqs = int(d["fraud_score"]); break
+                except Exception:
+                    pass
+        if ipqs is not None:
+            score = ipqs
+            factors.append(f"IPQS fraud score: {ipqs}")
+        else:
+            if lt == "voip":
+                score += 55; factors.append("VoIP line — common for OTP fraud/burners")
+            if any(k in car for k in ("google", "twilio", "textnow", "bandwidth", "voip")):
+                score += 35; factors.append(f"virtual carrier ({result.get('carrier')})")
+            if lt == "premium_rate":
+                score += 40; factors.append("premium-rate line")
+            if lt in ("mobile", "fixed_or_mobile") and not factors:
+                score += 5; factors.append("standard mobile line")
+            if not factors:
+                factors.append("no strong risk signals")
+        score = max(0, min(100, score))
+        level = "HIGH" if score >= 70 else "MEDIUM" if score >= 35 else "LOW"
+        return {"score": score, "level": level, "factors": factors}
 
     # ── Provider field normalization ──
     @staticmethod
@@ -2294,6 +2333,21 @@ def _render_phone_panels(target: str, data: dict):
     print(_panel("Validity & Format", rows2, width=72,
                  border_color=O, title_color=O))
 
+    # ── Risk Assessment (spam/fraud) ──
+    risk = data.get("risk", {})
+    if risk and risk.get("level") != "N/A":
+        lvl = risk.get("level", "LOW")
+        score = risk.get("score", 0)
+        col = {"HIGH": RED, "MEDIUM": Y, "LOW": G}.get(lvl, D)
+        filled = round(score / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        rows_r = [("Risk Level", f"{col}{lvl}{R}"),
+                  ("Risk Score", f"{col}{bar} {score}/100{R}")]
+        for fct in risk.get("factors", [])[:4]:
+            rows_r.append(("  ↳ factor", f"{D}{fct}{R}"))
+        print(_panel("⚠ Risk Assessment (spam / fraud)", rows_r, width=72,
+                     border_color=col, title_color=col))
+
     # Accuracy labels (consistent across the whole phone report)
     VER    = f"{G}✓ VERIFIED{R}"
     HIGH   = f"{G}✓ HIGH CONFIDENCE{R}"
@@ -2775,6 +2829,22 @@ async def main_async(args):
             _render_email_panels(t["value"], data)
         elif ttype == "image":
             _render_image_panels(t["value"], data)
+
+    # ── Bulk risk heatmap (phones) ──
+    phone_rows = [(it["target"]["value"], it.get("data", {}).get("risk", {}))
+                  for it in findings["results"]
+                  if it.get("target", {}).get("type") == "phone"
+                  and isinstance(it.get("data"), dict) and it["data"].get("risk")]
+    if len(phone_rows) >= 2:
+        G="\033[38;5;46m"; Y="\033[38;5;226m"; RED="\033[38;5;196m"
+        D="\033[38;5;240m"; R="\033[0m"
+        print("\n" + "="*60)
+        print("  Risk Heatmap")
+        print("="*60)
+        for num, risk in phone_rows:
+            lvl = risk.get("level", "LOW"); score = risk.get("score", 0)
+            col = {"HIGH": RED, "MEDIUM": Y, "LOW": G}.get(lvl, D)
+            print(f"  {col}●{R} {num:<20} {col}{lvl:<7} {score:>3}/100{R}")
 
     print("\n" + "="*60)
     print(f"Full report saved to: {base}.json")
