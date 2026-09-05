@@ -1611,11 +1611,19 @@ class ImageIntel:
                 result[key] = str(val)
 
             gps = {}
+            def _num(s):
+                # EXIF rationals arrive as "759/25" (fraction) or plain "27"
+                s = s.strip()
+                if "/" in s:
+                    n, d = s.split("/", 1)
+                    d = float(d)
+                    return float(n) / d if d else 0.0
+                return float(s)
             def dms_to_decimal(dms, ref):
                 parts = str(dms).strip("[]").split(", ")
-                deg = float(parts[0]) if parts else 0
-                mn = float(parts[1]) if len(parts) > 1 else 0
-                sec = float(parts[2]) if len(parts) > 2 else 0
+                deg = _num(parts[0]) if parts else 0
+                mn = _num(parts[1]) if len(parts) > 1 else 0
+                sec = _num(parts[2]) if len(parts) > 2 else 0
                 decimal = deg + mn / 60 + sec / 3600
                 if ref in ("S", "W"):
                     decimal = -decimal
@@ -1820,7 +1828,9 @@ class GhostBusterEngine:
                 elif ttype == "phone":
                     tasks.append(self.investigate_phone(session, value))
                 elif ttype == "image":
-                    tasks.append(asyncio.coroutine(lambda v=value: {"exif": ImageIntel.extract_exif(v)})())
+                    async def _img(v=value):
+                        return {"exif": ImageIntel.extract_exif(v)}
+                    tasks.append(_img())
                 else:
                     log.warning(f"Unknown target type: {ttype}")
 
@@ -1949,6 +1959,60 @@ def _panel(title: str, rows: list[tuple], width: int = 70,
     lines.append(bot)
     return "\n".join(lines)
 
+
+def _render_image_panels(target: str, data: dict):
+    G = "\033[38;5;46m"; O = "\033[38;5;208m"; C = "\033[38;5;51m"
+    Y = "\033[38;5;226m"; RED = "\033[38;5;196m"; W = "\033[38;5;255m"
+    D = "\033[38;5;240m"; R = "\033[0m"; P = "\033[38;5;213m"
+
+    exif = data.get("exif", {})
+    if not isinstance(exif, dict) or not exif:
+        print(f"\n{RED}  ✗ no EXIF metadata found{R}\n")
+        return
+    if exif.get("error"):
+        print(f"\n{RED}  ✗ {exif['error']}{R}\n")
+        return
+
+    dev = exif.get("_device", {}) or {}
+    gps = exif.get("_gps", {}) or {}
+
+    # ── Device / camera panel ──
+    rows_dev = [
+        ("Camera Make",  f"{W}{dev.get('make') or '—'}{R}"),
+        ("Camera Model", f"{W}{dev.get('model') or '—'}{R}"),
+        ("Software",     f"{W}{dev.get('software') or '—'}{R}"),
+        ("Taken",        f"{Y}{dev.get('datetime') or '—'}{R}"),
+    ]
+    print()
+    print(_panel("Camera / Device", rows_dev, width=72,
+                 border_color=C, title_color=C))
+
+    # ── GPS geolocation panel (the headline OSINT) ──
+    if gps.get("latitude") is not None and gps.get("longitude") is not None:
+        rows_gps = [
+            ("Latitude",    f"{G}{gps['latitude']}{R}"),
+            ("Longitude",   f"{G}{gps['longitude']}{R}"),
+            ("Google Maps", f"{C}{gps.get('maps_link','')}{R}"),
+            ("OpenStreetMap", f"{D}https://www.openstreetmap.org/?mlat="
+                              f"{gps['latitude']}&mlon={gps['longitude']}#map=16/"
+                              f"{gps['latitude']}/{gps['longitude']}{R}"),
+        ]
+        print(_panel("📍 GPS Geolocation  (LOCATION LEAK)", rows_gps, width=90,
+                     border_color=G, title_color=G))
+    else:
+        print(_panel("📍 GPS Geolocation", [("Status",
+                     f"{D}no GPS tags in this image{R}")], width=72,
+                     border_color=D, title_color=D))
+
+    # ── Other EXIF tags (skip internal + already-shown) ──
+    skip = {"_device", "_gps"}
+    dev_shown = {"Image Make", "Image Model", "Image Software", "Image DateTime"}
+    extra = [(k, str(v)) for k, v in exif.items()
+             if k not in skip and k not in dev_shown and not k.startswith("GPS ")]
+    if extra:
+        rows_x = [(k, f"{D}{v[:60]}{R}") for k, v in extra[:15]]
+        print(_panel("Other EXIF Tags", rows_x, width=90,
+                     border_color=P, title_color=P))
 
 def _render_phone_panels(target: str, data: dict):
     G = "\033[38;5;46m"    # green
@@ -2429,13 +2493,7 @@ async def main_async(args):
         elif ttype == "email":
             _render_email_panels(t["value"], data)
         elif ttype == "image":
-            exif = data.get("exif", {})
-            rows = ([(k, f"\033[38;5;255m{v}\033[0m") for k, v in list(exif.items())[:20]]
-                    if isinstance(exif, dict) and exif
-                    else [("note", "\033[38;5;240mno EXIF metadata found\033[0m")])
-            print()
-            print(_panel("Image EXIF / GPS", rows, width=84,
-                         border_color="\033[38;5;213m", title_color="\033[38;5;213m"))
+            _render_image_panels(t["value"], data)
 
     print("\n" + "="*60)
     print(f"Full report saved to: {base}.json")
