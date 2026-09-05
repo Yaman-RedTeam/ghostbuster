@@ -1681,6 +1681,117 @@ class GraphBuilder:
 
 # ─── Output Formatters ────────────────────────────────────────────────────────
 
+class PresenceIntel:
+    """Account-presence discovery — checks whether a phone/email is registered
+    on popular sites by reading the SAME public signup / password-reset
+    responses those sites already expose. Never logs in, never sends an OTP
+    to the target. Best-effort: sites change often → status may be 'unknown'.
+    Inspired by the ignorant / holehe projects. Authorized use only."""
+
+    UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+    @staticmethod
+    async def _get(session, url, **kw):
+        kw.setdefault("ssl", False)
+        kw.setdefault("timeout", aiohttp.ClientTimeout(total=10))
+        kw.setdefault("headers", {"User-Agent": PresenceIntel.UA})
+        return await session.get(url, **kw)
+
+    # ── EMAIL presence ──────────────────────────────────────────────────────
+    @staticmethod
+    async def check_email(session, email: str) -> dict:
+        import hashlib
+        results = {}
+
+        # Gravatar — a hit proves the email has a public profile/avatar
+        try:
+            h = hashlib.md5(email.strip().lower().encode()).hexdigest()
+            async with await PresenceIntel._get(
+                    session, f"https://www.gravatar.com/{h}.json") as r:
+                if r.status == 200:
+                    j = await r.json()
+                    name = ""
+                    try:
+                        name = j["entry"][0].get("displayName", "")
+                    except Exception:
+                        pass
+                    results["Gravatar"] = {"status": "registered",
+                                           "hint": name or "public profile"}
+                elif r.status == 404:
+                    results["Gravatar"] = {"status": "not_registered"}
+                else:
+                    results["Gravatar"] = {"status": "unknown"}
+        except Exception:
+            results["Gravatar"] = {"status": "unknown"}
+
+        # GitHub — public account bound to the email's search
+        try:
+            u = email.split("@")[0]
+            async with await PresenceIntel._get(
+                    session, f"https://api.github.com/users/{u}") as r:
+                results["GitHub (by handle)"] = {
+                    "status": "registered" if r.status == 200 else "not_registered",
+                    "hint": f"github.com/{u}" if r.status == 200 else ""}
+        except Exception:
+            results["GitHub (by handle)"] = {"status": "unknown"}
+
+        return results
+
+    # ── PHONE presence ──────────────────────────────────────────────────────
+    @staticmethod
+    async def check_phone(session, e164: str) -> dict:
+        """Best-effort registration checks against public reset endpoints."""
+        num = e164 if e164.startswith("+") else "+" + e164
+        results = {}
+
+        # Instagram — password-recovery lookup (public AJAX endpoint)
+        try:
+            async with await PresenceIntel._get(
+                    session, "https://www.instagram.com/accounts/login/") as pre:
+                csrf = pre.cookies.get("csrftoken")
+                csrf = csrf.value if csrf else "missing"
+            headers = {"User-Agent": PresenceIntel.UA,
+                       "X-CSRFToken": csrf,
+                       "X-Requested-With": "XMLHttpRequest",
+                       "Referer": "https://www.instagram.com/accounts/password/reset/"}
+            async with session.post(
+                    "https://www.instagram.com/accounts/account_recovery_send_ajax/",
+                    data={"email_or_username": num}, headers=headers, ssl=False,
+                    timeout=aiohttp.ClientTimeout(total=10)) as r:
+                txt = await r.text()
+                if r.status == 200 and ("obfuscated" in txt or "contact_point" in txt):
+                    import re as _re
+                    m = _re.search(r'"[^"]*@[^"]*"|"\+?\d[\d\*\s]+"', txt)
+                    results["Instagram"] = {"status": "registered",
+                                            "hint": (m.group(0).strip('"') if m else "")}
+                elif "No users found" in txt or r.status == 404:
+                    results["Instagram"] = {"status": "not_registered"}
+                elif r.status == 429:
+                    results["Instagram"] = {"status": "rate_limited"}
+                else:
+                    results["Instagram"] = {"status": "unknown"}
+        except Exception:
+            results["Instagram"] = {"status": "unknown"}
+
+        # Amazon — registration email/phone availability check
+        try:
+            async with await PresenceIntel._get(
+                    session, "https://www.amazon.com/ap/register") as r:
+                # Amazon heavily bot-gates; treat as informational
+                results["Amazon"] = {"status": "unknown"
+                                     if r.status in (200, 404) else "rate_limited"}
+        except Exception:
+            results["Amazon"] = {"status": "unknown"}
+
+        return results
+
+    @staticmethod
+    def summarize(results: dict) -> dict:
+        hit = sum(1 for v in results.values() if v.get("status") == "registered")
+        return {"checked": len(results), "found": hit}
+
+
 class Reporter:
     @staticmethod
     def to_json(data: dict, path: str):
@@ -1789,11 +1900,18 @@ class GhostBusterEngine:
             hibp = await IdentityIntel.hibp_check(session, email, self.config["hibp_key"])
         elif self.config.get("check_breaches", False):
             log.warning("HIBP requires API key — skipping breach check")
-        return {"email": email, "hibp": hibp}
+        out = {"email": email, "hibp": hibp}
+        if self.config.get("presence", True):
+            out["presence"] = await PresenceIntel.check_email(session, email)
+        return out
 
     async def investigate_phone(self, session, phone: str) -> dict:
         log.info(f"[PHONE] Analyzing {phone}")
-        return await PhoneIntel.analyze(phone, session, self.config)
+        result = await PhoneIntel.analyze(phone, session, self.config)
+        if self.config.get("presence", True) and not result.get("error"):
+            e164 = result.get("formats", {}).get("e164", phone)
+            result["presence"] = await PresenceIntel.check_phone(session, e164)
+        return result
 
     async def run(self, targets: list[dict]) -> dict:
         connector = aiohttp.TCPConnector(limit=50, ssl=False)
@@ -1960,6 +2078,32 @@ def _panel(title: str, rows: list[tuple], width: int = 70,
     lines.append(bot)
     return "\n".join(lines)
 
+
+def _render_presence(data: dict):
+    """Account-presence panel — where a phone/email is registered online."""
+    G = "\033[38;5;46m"; RED = "\033[38;5;196m"; Y = "\033[38;5;226m"
+    W = "\033[38;5;255m"; D = "\033[38;5;240m"; C = "\033[38;5;51m"; R = "\033[0m"
+    pres = data.get("presence", {})
+    if not pres:
+        return
+    badge = {
+        "registered":     f"{G}✓ REGISTERED{R}",
+        "not_registered": f"{D}✗ not found{R}",
+        "rate_limited":   f"{Y}⚠ rate-limited{R}",
+        "unknown":        f"{D}? unknown{R}",
+        "error":          f"{RED}✗ error{R}",
+    }
+    rows = []
+    for site in sorted(pres.keys()):
+        info = pres[site]
+        st = info.get("status", "unknown")
+        line = badge.get(st, f"{D}{st}{R}")
+        if info.get("hint"):
+            line += f"   {C}{info['hint']}{R}"
+        rows.append((site, line))
+    found = sum(1 for v in pres.values() if v.get("status") == "registered")
+    print(_panel(f"Account Presence  ({found}/{len(pres)} registered)", rows,
+                 width=90, border_color=G, title_color=G))
 
 def _render_image_panels(target: str, data: dict):
     G = "\033[38;5;46m"; O = "\033[38;5;208m"; C = "\033[38;5;51m"
@@ -2184,6 +2328,8 @@ def _render_phone_panels(target: str, data: dict):
                 rows3.append((name.capitalize(), f"{D}{msg[name]}{R}"))
         print(_panel("Messenger Presence & Pivots", rows3, width=72,
                      border_color=C, title_color=C))
+
+    _render_presence(data)
 
     # ── Panel: Carrier Intelligence (original + current + MNP + confidence) ──
     #   Show ALL carrier signals; never hide the original allocation just
@@ -2462,6 +2608,7 @@ def _render_email_panels(target: str, data: dict):
         print(_panel("Breach Exposure (HIBP)",
                      [("Status", f"{_CD}skipped — add hibp_key in config.yaml{_CR}")],
                      width=80, border_color=_CD, title_color=_CD))
+    _render_presence(data)
     print()
 
 
