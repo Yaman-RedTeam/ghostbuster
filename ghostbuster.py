@@ -2700,13 +2700,21 @@ def _render_ip_panels(target: str, data: dict):
         rows_i = []
         if rdns:
             rows_i.append(("Reverse DNS", f"{_CC}{', '.join(rdns)}{_CR}"))
+        if sh.get("hostnames"):
+            rows_i.append(("Hostnames", f"{_CW}{', '.join(sh['hostnames'][:6])}{_CR}"))
         if sh.get("ports"):
             rows_i.append(("Open Ports", f"{_CY}{', '.join(map(str, sh['ports']))}{_CR}"))
         if sh.get("os"):
             rows_i.append(("OS", f"{_CW}{sh['os']}{_CR}"))
+        # Per-port services (product / version) — the real infra fingerprint
+        for svc in (sh.get("services") or [])[:8]:
+            port = svc.get("port", "?")
+            prod = svc.get("product") or "unknown service"
+            ver = f" {svc['version']}" if svc.get("version") else ""
+            rows_i.append((f"  :{port}", f"{_CG}{prod}{ver}{_CR}"))
         if sh.get("vulns"):
-            rows_i.append(("CVEs", f"{_CRED}{', '.join(sh['vulns'][:8])}{_CR}"))
-        print(_panel("Infrastructure (Shodan / DNS)", rows_i, width=80,
+            rows_i.append(("⚠ CVEs", f"{_CRED}{', '.join(sh['vulns'][:10])}{_CR}"))
+        print(_panel("Infrastructure (Shodan / DNS)", rows_i, width=88,
                      border_color=_CC, title_color=_CC))
     print()
 
