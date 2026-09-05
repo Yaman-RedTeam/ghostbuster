@@ -2486,10 +2486,108 @@ def print_banner():
     except UnicodeEncodeError:
         pass
 
+def interactive_menu():
+    """Interactive menu for selecting reconnaissance type."""
+    _G = "\033[38;5;46m"      # neon green
+    _O = "\033[38;5;208m"     # neon orange
+    _C = "\033[38;5;51m"      # cyan
+    _Y = "\033[38;5;226m"     # yellow
+    _R = "\033[0m"            # reset
+    _D = "\033[38;5;240m"     # dim
+
+    menu_options = [
+        ("1", "📱 Phone Number", "phone", "Analyze phone numbers, carriers, location, MNP status"),
+        ("2", "🌍 IP Address", "ip", "GeoIP lookup, ASN, reverse DNS, infrastructure"),
+        ("3", "🔗 Domain", "domain", "WHOIS, DNS, subdomains, SSL certificates"),
+        ("4", "📧 Email Address", "email", "Email parsing, breach checking (HIBP)"),
+        ("5", "🔍 Username", "username", "Find social media profiles, linked accounts"),
+        ("6", "🌐 Website URL", "url", "URL expansion, redirects, domain analysis"),
+        ("7", "🖼️ Image File", "image", "EXIF metadata, geolocation, camera info"),
+        ("8", "📊 Bulk Scan", "bulk", "Scan multiple targets from file (CSV/JSON/TXT)"),
+    ]
+
+    print(f"\n{_G}{'='*80}{_R}")
+    print(f"{_O}Choose a reconnaissance type:{_R}\n")
+
+    for key, label, _, desc in menu_options:
+        print(f"{_Y}{key}{_R} {label}")
+        print(f"   {_D}{desc}{_R}\n")
+
+    print(f"{_O}Or use command-line mode:{_R}")
+    print(f"   {_C}ghostbuster <target>{_R}     {_D}(auto-detect type){_R}")
+    print(f"   {_C}ghostbuster phone +91XXXXXXXXXX{_R}")
+    print(f"   {_C}ghostbuster --bulk targets.txt{_R}\n")
+
+    print(f"{_G}{'='*80}{_R}\n")
+
+    while True:
+        try:
+            choice = input(f"{_O}Enter choice (1-8) or 'q' to quit: {_R}").strip().lower()
+
+            if choice == 'q':
+                print(f"{_Y}Exiting...{_R}")
+                sys.exit(0)
+
+            if choice not in ["1", "2", "3", "4", "5", "6", "7", "8"]:
+                print(f"{_G}Invalid choice. Please try again.{_R}\n")
+                continue
+
+            # Get the selected option
+            selected = menu_options[int(choice) - 1]
+            target_type = selected[2]
+
+            # Get input
+            if target_type == "bulk":
+                target = input(f"{_C}Enter file path (CSV/JSON/TXT): {_R}").strip()
+                if not target:
+                    print(f"{_Y}Cancelled.{_R}\n")
+                    continue
+                return type('Args', (), {
+                    'target': None,
+                    'value': None,
+                    'type': target_type,
+                    'bulk': target,
+                    'config': 'config.yaml',
+                    'output': 'ghostbuster_report',
+                    'format': 'json',
+                    'graph': False,
+                    'log_level': 'INFO'
+                })()
+            else:
+                prompt = f"{_C}Enter {selected[1].split()[1:]} target: {_R}"
+                target = input(prompt).strip()
+                if not target:
+                    print(f"{_Y}Cancelled.{_R}\n")
+                    continue
+
+            return type('Args', (), {
+                'target': target,
+                'value': None,
+                'type': target_type,
+                'bulk': None,
+                'config': 'config.yaml',
+                'output': 'ghostbuster_report',
+                'format': 'json',
+                'graph': False,
+                'log_level': 'INFO'
+            })()
+
+        except KeyboardInterrupt:
+            print(f"\n{_Y}Cancelled.{_R}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"{_G}Error: {e}{_R}\n")
+            continue
+
 def main():
     print_banner()
     parser = build_parser()
     args = parser.parse_args()
+
+    # Show interactive menu if no arguments provided
+    if not args.target and not args.bulk:
+        args = interactive_menu()
+
     asyncio.run(main_async(args))
 
 if __name__ == "__main__":
