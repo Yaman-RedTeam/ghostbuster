@@ -2486,23 +2486,23 @@ def _print_rich_header():
     console = Console()
     console.print()
 
-    # ── Wordmark (centered as one rectangular block on the terminal axis) ──
+    # ── Wordmark (left-aligned block) ──
     if console.width >= _LOGO_W + 2:
         logo = Text(no_wrap=True)
         for n, (g, o) in enumerate(_LOGO):
             logo.append(g, style=f"bold {_GREEN}")
             tail = o.ljust(_LOGO_W - len(g))
             logo.append(tail + ("\n" if n < len(_LOGO) - 1 else ""), style=f"bold {_ORANGE}")
-        console.print(Align.center(logo))
+        console.print(logo)
     else:  # compact fallback on narrow terminals
         wm = Text()
         wm.append("👻 GHOST", style=f"bold {_GREEN}")
         wm.append("BUSTER", style=f"bold {_ORANGE}")
-        console.print(Align.center(wm))
+        console.print(wm)
 
     console.print()
 
-    # ── Information box (fixed width, every line centered inside) ──
+    # ── Information box (fixed width, left-aligned, every line centered inside) ──
     W = _box_width(console)
     info = Text(justify="center")
     info.append("👻 GhostBuster", style=f"bold {_GREEN}")
@@ -2515,9 +2515,9 @@ def _print_rich_header():
     info.append("   ·   ", style=_MUTED)
     info.append("Authorized Testing Only\n", style=f"bold {_GREEN}")
     info.append("github.com/Yaman-RedTeam/ghostbuster", style=_MUTED)
-    console.print(Align.center(
+    console.print(
         Panel(info, box=rich_box.ROUNDED, border_style=_GREEN, width=W, padding=(0, 2))
-    ))
+    )
 
 MENU_OPTIONS = [
     ("1", "📱", "Phone Number",   "phone",    "Carrier · location · MNP · messengers"),
@@ -2570,9 +2570,9 @@ def _rich_menu():
     cc.append("⚡ ", style=_ORANGE)
     cc.append("GHOSTBUSTER", style="bold #00d7ff")
     cc.append("  OSINT COMMAND CENTER", style=f"bold {_ORANGE}")
-    console.print(Align.center(
+    console.print(
         Panel(cc, box=rich_box.ROUNDED, border_style="#00d7ff", width=W, padding=(0, 2))
-    ))
+    )
     console.print()
 
     # ── Options table — colorful cyberpunk, one distinct hue per vector ──
@@ -2595,7 +2595,7 @@ def _rich_menu():
             f"{icon}  [{c}]{label}[/{c}]",
             f"[{DESC}]{desc}[/{DESC}]",
         )
-    console.print(Align.center(table))
+    console.print(table)
     console.print()
 
     # ── Selection loop ──
