@@ -2495,72 +2495,79 @@ def _rich_menu():
     console = Console()
 
     # ── Header band ──
+    # Brand palette — matches the banner: GHOST=green, BUSTER=orange
+    GREEN, ORANGE, WHITE, DIM = "#00ff00", "#ff8700", "#e8e8e8", "grey54"
+    MENU_W = 78   # fixed width → aligns as a neat card on the left, like the banner
+
     console.print()
+
+    # ── Header band (green→orange to echo the wordmark) ──
     header = Text()
-    header.append("  👻  ", style="bold bright_green")
-    header.append("G H O S T B U S T E R", style="bold bright_green")
-    header.append("   OSINT Command Center", style="bright_white")
-    console.print(Align.center(
-        Panel(Align.center(header), box=rich_box.DOUBLE,
-              border_style="bright_green", padding=(0, 2),
-              subtitle="[dim]v1.1.0 · Yaman.RedTeam · Authorized Testing Only[/dim]")
+    header.append("👻 ", style=f"bold {GREEN}")
+    header.append("GHOST", style=f"bold {GREEN}")
+    header.append("BUSTER", style=f"bold {ORANGE}")
+    header.append("  Command Center", style=f"bold {WHITE}")
+    console.print(Panel(
+        header, box=rich_box.DOUBLE, border_style=GREEN, width=MENU_W,
+        padding=(0, 2),
+        subtitle=f"[{DIM}]v1.1.0 · Yaman.RedTeam · Authorized Testing Only[/{DIM}]",
+        subtitle_align="right",
     ))
-    console.print()
 
-    # ── Options table (2-column card grid) ──
-    palette = ["bright_green", "bright_cyan", "bright_magenta", "yellow",
-               "bright_blue", "bright_red", "magenta", "green"]
+    # ── Options table (brand two-tone: alternating green / orange) ──
+    row_colors = [GREEN, ORANGE]
 
-    table = Table(show_header=True, box=rich_box.ROUNDED, border_style="grey37",
-                  header_style="bold bright_white on grey19", expand=True,
-                  padding=(0, 1), title="[bold bright_cyan]⚡ Choose Your Reconnaissance Vector[/bold bright_cyan]",
-                  title_justify="center")
-    table.add_column("#", justify="center", style="bold", width=4)
-    table.add_column("Target", justify="left", width=22)
-    table.add_column("Intelligence Gathered", justify="left", style="dim", overflow="fold")
+    table = Table(show_header=True, box=rich_box.HEAVY_HEAD, border_style=f"{GREEN}",
+                  header_style=f"bold {WHITE}", width=MENU_W, padding=(0, 1),
+                  title=f"[bold {ORANGE}]⚡  Choose Your Reconnaissance Vector[/bold {ORANGE}]",
+                  title_justify="center", row_styles=["", "on grey11"])
+    table.add_column("#", justify="center", width=3)
+    table.add_column("Target", justify="left", width=20, no_wrap=True)
+    table.add_column("Intelligence Gathered", justify="left", overflow="fold")
 
     for i, (key, icon, label, _, desc) in enumerate(MENU_OPTIONS):
-        color = palette[i % len(palette)]
+        c = row_colors[i % 2]
         table.add_row(
-            f"[{color}]{key}[/{color}]",
-            f"{icon}  [{color}]{label}[/{color}]",
-            desc
+            f"[bold {c}]{key}[/bold {c}]",
+            f"{icon}  [{c}]{label}[/{c}]",
+            f"[{DIM}]{desc}[/{DIM}]",
         )
     console.print(table)
-    console.print()
+    console.print(f"[{DIM}]  Type the number of a vector, or [{ORANGE}]q[/{ORANGE}] to quit.[/{DIM}]")
 
     # ── Selection loop ──
     valid = [o[0] for o in MENU_OPTIONS]
     while True:
         try:
             choice = Prompt.ask(
-                "[bold bright_green]►[/bold bright_green] [bright_white]Select vector[/bright_white]",
+                f"\n[bold {GREEN}]►[/bold {GREEN}] [{WHITE}]Select vector[/{WHITE}]",
                 choices=valid + ["q"], show_choices=False, default="1"
             ).strip().lower()
 
             if choice == 'q':
-                console.print("[yellow]  ✦ Exiting GhostBuster. Stay ethical! 👻[/yellow]")
+                console.print(f"[{ORANGE}]  ✦ Exiting GhostBuster. Stay ethical! 👻[/{ORANGE}]")
                 sys.exit(0)
 
             key, icon, label, ttype, desc = MENU_OPTIONS[int(choice) - 1]
-            console.print(f"\n[bold {palette[int(choice)-1]}]  {icon} {label}[/bold {palette[int(choice)-1]}] [dim]selected[/dim]")
+            c = row_colors[(int(choice) - 1) % 2]
+            console.print(f"\n[bold {c}]  {icon} {label}[/bold {c}] [{DIM}]selected[/{DIM}]")
 
             if ttype == "bulk":
-                target = Prompt.ask("[bright_cyan]  📁 File path (CSV/JSON/TXT)[/bright_cyan]").strip()
+                target = Prompt.ask(f"[{ORANGE}]  📁 File path (CSV/JSON/TXT)[/{ORANGE}]").strip()
                 if not target:
-                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    console.print(f"[{ORANGE}]  ✦ Cancelled[/{ORANGE}]\n")
                     continue
                 return _make_args(bulk=target, ttype="bulk")
             else:
-                target = Prompt.ask(f"[bright_cyan]  🎯 Enter {label}[/bright_cyan]").strip()
+                target = Prompt.ask(f"[{ORANGE}]  🎯 Enter {label}[/{ORANGE}]").strip()
                 if not target:
-                    console.print("[yellow]  ✦ Cancelled[/yellow]\n")
+                    console.print(f"[{ORANGE}]  ✦ Cancelled[/{ORANGE}]\n")
                     continue
-                console.print(f"[dim]  ⟳ Launching reconnaissance...[/dim]\n")
+                console.print(f"[{GREEN}]  ⟳ Launching reconnaissance...[/{GREEN}]\n")
                 return _make_args(target=target, ttype=ttype)
 
         except (KeyboardInterrupt, EOFError):
-            console.print("\n[yellow]  ✦ Cancelled[/yellow]")
+            console.print(f"\n[{ORANGE}]  ✦ Cancelled[/{ORANGE}]")
             sys.exit(0)
 
 def _basic_menu():
