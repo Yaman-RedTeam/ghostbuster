@@ -1893,6 +1893,40 @@ class PresenceIntel:
         except Exception:
             results["Adobe"] = {"status": "unknown"}
 
+        # LinkedIn — public profile by the email's handle (200=exists, 999=blocked)
+        try:
+            handle = email.split("@")[0]
+            async with await PresenceIntel._get(
+                    session, f"https://www.linkedin.com/in/{handle}",
+                    allow_redirects=False) as r:
+                if r.status == 200:
+                    results["LinkedIn"] = {"status": "registered",
+                                           "hint": f"linkedin.com/in/{handle}"}
+                elif r.status == 404:
+                    results["LinkedIn"] = {"status": "not_registered"}
+                elif r.status == 999:
+                    results["LinkedIn"] = {"status": "rate_limited"}
+                else:
+                    results["LinkedIn"] = {"status": "unknown"}
+        except Exception:
+            results["LinkedIn"] = {"status": "unknown"}
+
+        # Snapchat — public add page by the email's handle
+        try:
+            handle = email.split("@")[0]
+            async with await PresenceIntel._get(
+                    session, f"https://www.snapchat.com/add/{handle}",
+                    allow_redirects=False) as r:
+                if r.status == 200:
+                    results["Snapchat"] = {"status": "registered",
+                                           "hint": f"snapchat.com/add/{handle}"}
+                elif r.status in (404, 302, 301):
+                    results["Snapchat"] = {"status": "not_registered"}
+                else:
+                    results["Snapchat"] = {"status": "unknown"}
+        except Exception:
+            results["Snapchat"] = {"status": "unknown"}
+
         # Instagram — email registration lookup (reuses CSRF from web)
         try:
             async with await PresenceIntel._get(
