@@ -1860,6 +1860,64 @@ class PresenceIntel:
         except Exception:
             results["Firefox"] = {"status": "unknown"}
 
+        # Imgur — account availability (url=email); 429 → rate-limited
+        try:
+            async with await PresenceIntel._get(session,
+                    f"https://api.imgur.com/account/v1/accounts/available?url={email}") as r:
+                if r.status == 429:
+                    results["Imgur"] = {"status": "rate_limited"}
+                else:
+                    j = await r.json(content_type=None)
+                    avail = j.get("available")
+                    results["Imgur"] = {"status": "not_registered" if avail
+                        else ("registered" if avail is False else "unknown")}
+        except Exception:
+            results["Imgur"] = {"status": "unknown"}
+
+        # Adobe — account lookup
+        try:
+            async with session.post(
+                    "https://auth.services.adobe.com/signin/v2/users/accounts",
+                    json={"username": email, "accountType": ""},
+                    headers={"User-Agent": PresenceIntel.UA,
+                             "Content-Type": "application/json",
+                             "x-ims-clientid": "adobedotcom2"}, ssl=False,
+                    timeout=aiohttp.ClientTimeout(total=10)) as r:
+                txt = (await r.text())[:300].lower()
+                if "known" in txt or r.status == 200:
+                    results["Adobe"] = {"status": "registered"}
+                elif "not" in txt and "found" in txt:
+                    results["Adobe"] = {"status": "not_registered"}
+                else:
+                    results["Adobe"] = {"status": "unknown"}
+        except Exception:
+            results["Adobe"] = {"status": "unknown"}
+
+        # Instagram — email registration lookup (reuses CSRF from web)
+        try:
+            async with await PresenceIntel._get(
+                    session, "https://www.instagram.com/accounts/login/") as pre:
+                csrf = pre.cookies.get("csrftoken")
+                csrf = csrf.value if csrf else "missing"
+            async with session.post(
+                    "https://www.instagram.com/accounts/account_recovery_send_ajax/",
+                    data={"email_or_username": email},
+                    headers={"User-Agent": PresenceIntel.UA, "X-CSRFToken": csrf,
+                             "X-Requested-With": "XMLHttpRequest",
+                             "Referer": "https://www.instagram.com/accounts/password/reset/"},
+                    ssl=False, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                txt = await r.text()
+                if r.status == 200 and ("obfuscated" in txt or "contact_point" in txt):
+                    results["Instagram"] = {"status": "registered"}
+                elif "No users found" in txt:
+                    results["Instagram"] = {"status": "not_registered"}
+                elif r.status == 429:
+                    results["Instagram"] = {"status": "rate_limited"}
+                else:
+                    results["Instagram"] = {"status": "unknown"}
+        except Exception:
+            results["Instagram"] = {"status": "unknown"}
+
         return results
 
     # ── PHONE presence ──────────────────────────────────────────────────────
